@@ -16,7 +16,9 @@
     // Optional: comma-separated team IDs, abbreviations or names to leave off the board
     "HIDE_TEAMS": "",
     // Day your weeks start in US Eastern time (Tuesday: weeks run Tuesday to Monday)
-    "WEEK_START": "Tuesday"
+    "WEEK_START": "Tuesday",
+    // Time zone for game start and finish times (Victoria = Australia/Melbourne)
+    "TIMEZONE": "Australia/Melbourne"
   }
   // Secrets (never put these here, optional if the league is public): npx wrangler secret put ESPN_S2 / ESPN_SWID
 }

@@ -8,6 +8,7 @@ const VIEWS = new Set(['mSettings', 'mTeam', 'mRoster', 'mMatchup', 'mMatchupSco
 const LIVE_TTL = 90;
 const PAST_TTL = 12 * 3600;
 const SCHEDULE_TTL = 6 * 3600;
+const SCOREBOARD = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard';
 
 // Stand-in for the Workers Cache API when running under Node.
 const memory = new Map();
@@ -55,12 +56,24 @@ export async function handleApi(request, env, ctx) {
         season,
         platform: env.PLATFORM || 'cloudflare',
         weekStart: env.WEEK_START || null,
+        timezone: env.TIMEZONE || null,
         hideTeams: String(env.HIDE_TEAMS || '').split(',').map((s) => s.trim()).filter(Boolean),
       });
     }
 
     if (url.pathname === '/api/pro-schedule') {
       return await proxy(`${ESPN}/${season}?view=proTeamSchedules_wl`, { ctx, ttl: SCHEDULE_TTL, fresh: false, what: 'schedule', season });
+    }
+
+    // Which games are scheduled, in play or final on a US date. No login needed; trimmed to what the page reads.
+    if (url.pathname === '/api/scoreboard') {
+      const date = url.searchParams.get('date') || '';
+      if (!/^\d{8}$/.test(date)) return json({ error: 'date must look like 20261028.' }, 400);
+      const res = await fetch(`${SCOREBOARD}?dates=${date}`, { headers: { Accept: 'application/json' } });
+      if (!res.ok) return json({ error: `ESPN’s scoreboard returned HTTP ${res.status}.` }, 502);
+      const body = await res.json();
+      const events = (body.events || []).map((e) => ({ id: e.id, date: e.date, status: { type: { state: e.status?.type?.state, detail: e.status?.type?.detail } } }));
+      return new Response(JSON.stringify({ events }), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=30' } });
     }
 
     if (url.pathname === '/api/league') {

@@ -318,3 +318,12 @@ code { font-size: 0.9em; background: var(--track); padding: 0.05rem 0.3rem; over
 .seg { display: inline-flex; border: 2px solid var(--ink); border-radius: 999px; overflow: hidden; margin-bottom: 0.9rem; }
 .seg button { font-family: inherit; font-weight: 600; font-size: 0.9rem; line-height: 1; padding: 0.55rem 0.9rem; background: none; border: 0; color: var(--ink); cursor: pointer; }
 .seg button[aria-pressed='true'] { background: var(--ink); color: var(--floor); }
+
+.gameday { margin: 1rem 0 0.4rem; padding: 0.8rem 1rem; border: 2px solid var(--ink); border-radius: 10px; background: rgba(255, 245, 230, 0.55); }
+.gameday p { margin: 0.15rem 0; }
+.gameday .times, .gameday .est { color: var(--muted); font-size: 0.92rem; }
+.gameday p + p:not(.times) { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px dashed var(--line); }
+.chip { display: inline-block; font-weight: 700; font-size: 0.85rem; padding: 0.1rem 0.6rem; border-radius: 999px; background: var(--ink); color: var(--floor); margin-right: 0.3rem; }
+.chip.live { background: var(--paint); color: var(--paint-ink); }
+.chip.done { background: var(--up); color: var(--paint-ink); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

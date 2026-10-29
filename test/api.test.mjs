@@ -41,7 +41,7 @@ fake.restore();
 {
   fake = installFakeEspn();
   const { body } = await get('/api/config', { ...COOKIES, HIDE_TEAMS: 'Bench Mob, 3' });
-  assert.deepEqual(body, { configured: true, hasCookies: true, leagueId: '424242', season: 2027, platform: 'cloudflare', weekStart: null, hideTeams: ['Bench Mob', '3'] });
+  assert.deepEqual(body, { configured: true, hasCookies: true, leagueId: '424242', season: 2027, platform: 'cloudflare', weekStart: null, timezone: null, hideTeams: ['Bench Mob', '3'] });
   assert.ok(!JSON.stringify(body).includes('AEBxyz123'));
   assert.equal((await get('/api/config', { LEAGUE_ID: '' })).body.configured, false);
   assert.equal((await get('/api/config', { ...COOKIES, ESPN_SWID: '' })).body.hasCookies, false, 'needs both cookies');
@@ -140,6 +140,26 @@ for (const [mode, status, pattern] of [
   const post = await handleApi(new Request('http://local/api/config', { method: 'POST' }), {}, ctx);
   assert.equal(post.status, 405);
   fake.restore();
+}
+
+// Scoreboard: trimmed to what the page reads, and only for a real date
+{
+  const real = globalThis.fetch;
+  const asked = [];
+  globalThis.fetch = async (input) => {
+    asked.push(String(input));
+    return new Response(JSON.stringify({ events: [{ id: '1', date: '2026-10-28T23:00Z', shortName: 'MIA @ ATL', competitions: [{ big: 'payload' }], status: { type: { state: 'post', detail: 'Final', completed: true }, clock: 0 } }] }), { status: 200 });
+  };
+  const r = await get('/api/scoreboard?date=20261028');
+  assert.equal(r.res.status, 200);
+  assert.deepEqual(r.body, { events: [{ id: '1', date: '2026-10-28T23:00Z', status: { type: { state: 'post', detail: 'Final' } } }] });
+  assert.match(asked[0], /scoreboard\?dates=20261028$/);
+  for (const bad of ['', 'abc', '2026-10-28', '20261028;x']) assert.equal((await get(`/api/scoreboard?date=${encodeURIComponent(bad)}`)).res.status, 400, bad);
+  globalThis.fetch = async () => new Response('x', { status: 503 });
+  const down = await get('/api/scoreboard?date=20261028');
+  assert.equal(down.res.status, 502);
+  assert.match(down.body.error, /HTTP 503/);
+  globalThis.fetch = real;
 }
 
 // .env parsing

@@ -1,6 +1,6 @@
-import { buildModel } from './logic.js';
+import { buildModel, dayInfo, dayLabel, duration, etDateKey, gameDays, localTime, validTimeZone, zoneName } from './logic.js';
 import { loadLeague, loadSeasonDays } from './pipeline.js';
-import { createApiSource, createSnapshotSource, checkSnapshot } from './sources.js';
+import { createApiSource, createSnapshotSource, checkSnapshot, fetchScoreboard } from './sources.js';
 
 const HOUR = 3_600_000;
 const params = new URLSearchParams(location.search);
@@ -93,7 +93,8 @@ const dayCache = (cfg) => ({
 
 /* ---------- Load ---------- */
 
-const state = { tab: 'week', recapView: 'live', model: null, ctx: null, src: null, updated: 0, tried: 0, busy: false, check: null };
+const state = { tab: 'week', recapView: 'live', model: null, ctx: null, src: null, updated: 0, tried: 0, busy: false, check: null, board: null, tz: 'Australia/Melbourne' };
+const BOARD_POLL = 3 * 60_000;
 
 async function load({ fresh = false } = {}) {
   if (state.busy) return;
@@ -107,12 +108,14 @@ async function load({ fresh = false } = {}) {
     const ctx = await loadLeague(src, { forceRoster: FORCE_ROSTER, fresh, cache: dayCache(cfg) });
     state.src = src;
     state.ctx = ctx;
-    state.model = buildModel({ ...ctx, now: src.now() });
+    state.tz = validTimeZone(cfg.timezone) ? cfg.timezone : 'Australia/Melbourne';
+    state.model = buildModel({ ...ctx, now: src.now(), dayDone: boardDone() });
     state.updated = Date.now();
     state.check = null;
     state.seasonLoaded = false;
     if (src.offline) await loadSeason(); // history is already in the snapshot
     render();
+    refreshBoard();
   } catch (err) {
     renderError(err);
   } finally {
@@ -139,6 +142,7 @@ function setBusy(on) {
 
 function render() {
   const m = state.model;
+  renderGameDay();
   $('league-name').textContent = m.leagueName;
   $('week-label').textContent = `Week ${m.week.id}, day ${m.week.dayNumber} of ${m.week.days}. ${m.week.label}`;
   const snap = state.src.generatedAt;
@@ -369,6 +373,62 @@ function renderError(err) {
     </div>`;
 }
 
+/* ---------- Game day times ---------- */
+
+// True/false once the live scoreboard covers today's slate, otherwise undefined (the clock decides).
+// A snapshot's numbers can be older than the scoreboard, so the snapshot keeps using the clock.
+function boardDone() {
+  if (!state.ctx || state.src?.kind === 'static') return undefined;
+  const info = dayInfo(state.ctx.pro, state.ctx.league.currentSP, Date.now(), state.board);
+  return info && !info.estimated ? info.state === 'done' : undefined;
+}
+
+const when = (ms) => `${localTime(ms, state.tz)} ${zoneName(ms, state.tz)}`;
+
+function dayLine(d, now, { next = false } = {}) {
+  const label = `${dayLabel(state.ctx.pro, d.sp)} (US)`;
+  const slate = `${plural(d.games, 'game')}, first game ${when(d.firstTip)}, likely finished by ${localTime(d.likelyEnd, state.tz)}.`;
+  const tag = d.estimated ? ' <span class="est">estimated</span>' : '';
+  if (next) return `<p><b>Next: ${esc(label)}:</b> ${esc(slate)}</p>`;
+  let status;
+  if (d.state === 'done') status = '<span class="chip done">Finished for the day</span>';
+  else if (d.state === 'live') {
+    const left = d.likelyEnd - now;
+    const progress = d.final == null ? '' : `${d.final} of ${d.games} games final. `;
+    status = `<span class="chip live">In progress</span> ${progress}${left > 0 ? `About ${duration(left)} to go.` : 'Should be wrapping up.'}`;
+  } else status = `<span class="chip soon">${d.firstTip - now > 60_000 ? `Starts in ${duration(d.firstTip - now)}` : 'Starting now'}</span>`;
+  return `<p><b>${esc(label)}</b> ${status}${tag}</p><p class="times">${d.state === 'done' ? `Played from ${when(d.firstTip)}.` : esc(slate)}</p>`;
+}
+
+function renderGameDay() {
+  const el = $('gameday');
+  if (!state.ctx || DEMO) return void (el.hidden = true);
+  const now = Date.now();
+  const { today, next } = gameDays(state.ctx.pro, state.ctx.league.currentSP, now, state.board);
+  const over = !today || today.state === 'done';
+  const parts = [today && dayLine(today, now), over && next && dayLine(next, now, { next: true })].filter(Boolean);
+  el.hidden = !parts.length;
+  el.innerHTML = parts.length ? `<h2 class="sr">Game day times, ${esc(state.tz.replace('_', ' '))}</h2>${parts.join('')}` : '';
+}
+
+// Ask ESPN's scoreboard how today's games are going. Quietly skipped if it can't be reached.
+async function refreshBoard() {
+  if (DEMO || !state.ctx) return;
+  const { league, pro } = state.ctx;
+  const info = dayInfo(pro, league.currentSP, Date.now());
+  const key = etDateKey(pro, league.currentSP);
+  if (!info || !key || info.firstTip - Date.now() > 3 * HOUR) return; // nothing to watch yet
+  const before = boardDone();
+  // Through our own server when there is one (no browser restrictions), otherwise straight from ESPN
+  const viaServer = state.src?.kind === 'api' && !DEMO ? await fetchScoreboard(league.currentSP, key, () => fetch(`api/scoreboard?date=${key}`)) : null;
+  const board = viaServer || (await fetchScoreboard(league.currentSP, key));
+  if (!board) return;
+  state.board = board;
+  renderGameDay();
+  // The day just finished: reload so the recap and standings use the final numbers
+  if (boardDone() === true && before !== true && state.src?.kind !== 'static') load({ fresh: true });
+}
+
 /* ---------- Tabs and actions ---------- */
 
 function showTab(tab, focus = true) {
@@ -419,6 +479,8 @@ document.addEventListener('click', async (e) => {
 // A snapshot site checks for a new file every few minutes; a live site refreshes hourly.
 const interval = () => (state.src?.kind === 'static' ? STATIC_POLL : HOUR);
 $('refresh').addEventListener('click', () => load({ fresh: true }));
+setInterval(() => state.ctx && renderGameDay(), 60_000);
+setInterval(refreshBoard, BOARD_POLL);
 setInterval(() => {
   if (Date.now() - state.tried >= interval() - 1000) load();
 }, 60_000);

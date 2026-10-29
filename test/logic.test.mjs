@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createDemo } from '../public/demo.js';
 import {
-  parseLeague, parseProSchedule, parseEntry, buildWeeks, currentWeek, weekOf, dayLabel, spDay, parseWeekStart, isDayDone, projectTeam, simulateWeek, missChance, levelSd, MODEL, dailyFromSchedule,
+  parseLeague, parseProSchedule, parseEntry, buildWeeks, currentWeek, weekOf, dayLabel, spDay, parseWeekStart, isDayDone, projectTeam, simulateWeek, missChance, levelSd, MODEL, dayInfo, gameDays, localTime, zoneName, duration, etDateKey, validTimeZone, finishedThrough, dailyFromSchedule,
   dayFromRoster, buildModel, checkTotals, slimLeague, slimPro,
 } from '../public/logic.js';
 import { LIVE_VIEWS, loadLeague, loadSeasonDays, neededDays, historyOf } from '../public/pipeline.js';
-import { createSnapshotSource } from '../public/sources.js';
+import { createSnapshotSource, fetchScoreboard } from '../public/sources.js';
 
 const SEASON = 2027;
 
@@ -233,6 +233,69 @@ assert.equal(m.weeksSource, 'espn');
     assert.ok(Math.abs(r.weekPts - week) < 0.05, 'week total includes the finished day');
   }
   assert.equal(after.week.dayNumber, during.week.dayNumber, 'the This week tab is unchanged');
+}
+
+/* ---------- Game day times in Victoria ---------- */
+
+{
+  const MEL = 'Australia/Melbourne';
+  const HOUR = 3_600_000;
+  // Real ESPN schedule: Wed 28 Oct is 12 games, 7:00 pm ET first tip and 10:30 pm ET last tip (US daylight time)
+  const wed = dayInfo(realPro, 9, 0);
+  assert.equal(wed.games, 12);
+  assert.equal(localTime(wed.firstTip, MEL), 'Thu 10:00 am', '7 pm ET on 28 Oct is 10 am Thursday in Victoria (AEDT)');
+  assert.equal(localTime(wed.lastTip, MEL), 'Thu 1:30 pm');
+  assert.equal(localTime(wed.likelyEnd, MEL), 'Thu 4:00 pm', 'last tip-off + 2.5 hours');
+  assert.equal(zoneName(wed.firstTip, MEL), 'AEDT');
+  // US clocks go back on 1 Nov, so the same 7 pm ET tip is an hour later in Victoria
+  assert.equal(localTime(dayInfo(realPro, 14, 0).firstTip, MEL), 'Tue 11:00 am');
+  // Australian winter (AEST): 7 pm ET (EDT) is 9 am next day
+  assert.equal(localTime(Date.UTC(2027, 5, 10, 23, 0), MEL), 'Fri 9:00 am');
+  assert.equal(zoneName(Date.UTC(2027, 5, 10, 23, 0), MEL), 'AEST');
+  assert.equal(localTime(wed.firstTip, 'America/New_York'), 'Wed 7:00 pm', 'other time zones work');
+  assert.ok(validTimeZone(MEL) && !validTimeZone('Nowhere/Land') && !validTimeZone(''));
+  assert.deepEqual([duration(40 * 60_000), duration(8_100_000), duration(-5)], ['40m', '2h 15m', '0m']);
+  assert.equal(etDateKey(realPro, 9), '20261028');
+  assert.equal(etDateKey(realPro, 15), '20261103', 'a no-game day still has a date');
+  assert.equal(dayInfo(realPro, 15, 0), null, 'no games on 3 Nov');
+
+  // From the clock alone
+  assert.equal(dayInfo(realPro, 9, wed.firstTip - HOUR).state, 'upcoming');
+  assert.equal(dayInfo(realPro, 9, wed.firstTip + HOUR).state, 'live');
+  assert.equal(dayInfo(realPro, 9, wed.lastTip + 3.6 * HOUR).state, 'done');
+  assert.equal(dayInfo(realPro, 9, 0).estimated, true);
+
+  // From the live scoreboard, which beats the clock either way
+  const games = (...states) => states.map((state, i) => ({ id: String(i), state }));
+  const board = (sp, ...states) => ({ sp, games: games(...states) });
+  const all = (n, state) => Array(n).fill(state);
+  const during = dayInfo(realPro, 9, wed.lastTip + 4 * HOUR, board(9, ...all(7, 'post'), ...all(2, 'in'), ...all(3, 'pre')));
+  assert.deepEqual([during.state, during.final, during.estimated], ['live', 7, false], 'scoreboard says live although the clock says done');
+  assert.equal(dayInfo(realPro, 9, wed.firstTip - HOUR, board(9, ...all(12, 'post'))).state, 'done', 'all final means finished, whatever the clock says');
+  assert.equal(dayInfo(realPro, 9, 0, board(9, ...all(12, 'pre'))).state, 'upcoming');
+  assert.equal(dayInfo(realPro, 9, 0, board(9, ...all(5, 'post'))).estimated, true, 'a partial scoreboard is ignored');
+  assert.equal(dayInfo(realPro, 9, 0, board(8, ...all(12, 'post'))).estimated, true, 'so is one for another day');
+
+  // Today, then the next slate: Wed 28 Oct, then Thu 29 Oct (3 games, 8 pm ET = Fri 11 am)
+  const gd = gameDays(realPro, 9, wed.lastTip + 4 * HOUR, board(9, ...all(12, 'post')));
+  assert.equal(gd.today.state, 'done');
+  assert.equal(gd.next.sp, 10);
+  assert.equal(gd.next.games, 3);
+  assert.equal(localTime(gd.next.firstTip, MEL), 'Fri 11:00 am');
+  assert.equal(gameDays(realPro, 14, 0).next.sp, 16, 'the next slate skips the no-game day (SP 15)');
+  assert.equal(gameDays(realPro, 15, 0).today, null);
+
+  // The recap follows the scoreboard: ESPN says all final, so the day is finished even before 3.5 hours have passed
+  const league = { currentSP: 9 };
+  assert.equal(finishedThrough(league, realPro, wed.lastTip + HOUR), 8, 'the clock alone is cautious');
+  assert.equal(finishedThrough(league, realPro, wed.lastTip + HOUR, true), 9, 'the scoreboard says the games are over');
+  assert.equal(finishedThrough(league, realPro, wed.lastTip + 4 * HOUR, false), 8, 'and that a game is still on, however late');
+
+  // Scoreboard fetch: slimmed, and a failure is null rather than an error
+  const ok = { ok: true, json: async () => ({ events: [{ id: '1', date: '2026-10-28T23:00Z', status: { type: { state: 'post', detail: 'Final' } } }] }) };
+  assert.deepEqual(await fetchScoreboard(9, '20261028', async () => ok), { sp: 9, games: [{ id: '1', start: Date.UTC(2026, 9, 28, 23), state: 'post', detail: 'Final' }] });
+  assert.equal(await fetchScoreboard(9, '20261028', async () => ({ ok: false })), null);
+  assert.equal(await fetchScoreboard(9, '20261028', async () => { throw new Error('offline'); }), null);
 }
 
 /* ---------- Week simulation ---------- */

@@ -81,6 +81,7 @@ export function parseProSchedule(raw) {
   const games = new Map(); // proTeamId -> Map(sp -> game)
   const spDate = new Map(); // sp -> earliest tip-off (ms)
   const spLast = new Map(); // sp -> latest tip-off (ms)
+  const spSlate = new Map(); // sp -> tip-off time of every game that day (ms, sorted)
   const abbrev = new Map();
   for (const t of raw?.settings?.proTeams || []) {
     abbrev.set(t.id, t.abbrev || '');
@@ -93,10 +94,12 @@ export function parseProSchedule(raw) {
       bySP.set(sp, { date: num(g.date), opp: g.homeProTeamId === t.id ? g.awayProTeamId : g.homeProTeamId });
       if (!spDate.has(sp) || g.date < spDate.get(sp)) spDate.set(sp, num(g.date));
       if (!spLast.has(sp) || g.date > spLast.get(sp)) spLast.set(sp, num(g.date));
+      if (g.homeProTeamId === t.id) spSlate.set(sp, [...(spSlate.get(sp) || []), num(g.date)]); // count each game once, from the home side
     }
     games.set(t.id, bySP);
   }
-  return { games, spDate, spLast, abbrev, dayOffset: spDayOffset(spDate) };
+  for (const [sp, times] of spSlate) spSlate.set(sp, times.sort((a, b) => a - b));
+  return { games, spDate, spLast, spSlate, abbrev, dayOffset: spDayOffset(spDate) };
 }
 
 // ESPN scoring period N is one US Eastern calendar day, with no period at all on days with no games.
@@ -122,7 +125,8 @@ export function isDayDone(pro, sp, now) {
 }
 
 // The last scoring period whose results are final.
-export const finishedThrough = (league, pro, now) => (isDayDone(pro, league.currentSP, now) ? league.currentSP : league.currentSP - 1);
+// `dayDone`: true/false when the live scoreboard says whether today's games are all final; undefined falls back to the clock.
+export const finishedThrough = (league, pro, now, dayDone) => ((dayDone ?? isDayDone(pro, league.currentSP, now)) ? league.currentSP : league.currentSP - 1);
 
 // UTC midnight (ms) of the ET calendar date for scoring period `sp`, or null if unknown.
 export function spDay(pro, sp) {
@@ -323,6 +327,68 @@ export function weekLabel(pro, week) {
   return `${dayLabel(pro, week.sps[0])} to ${dayLabel(pro, week.sps[week.sps.length - 1])}`;
 }
 
+/* ---------- Game day schedule ---------- */
+
+const LIKELY_GAME = 2.5 * 3_600_000; // a typical NBA game, tip-off to final buzzer
+
+export function validTimeZone(tz) {
+  try {
+    new Intl.DateTimeFormat('en-AU', { timeZone: tz });
+    return Boolean(tz);
+  } catch {
+    return false;
+  }
+}
+
+// "Thu 10:00 am" in the given time zone (en-AU, 12-hour).
+export function localTime(ms, tz) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-AU', { timeZone: tz, weekday: 'short', hour: 'numeric', minute: '2-digit', hour12: true }).formatToParts(ms).map((x) => [x.type, x.value]));
+  return `${p.weekday} ${p.hour}:${p.minute} ${String(p.dayPeriod).toLowerCase()}`;
+}
+
+export const zoneName = (ms, tz) => new Intl.DateTimeFormat('en-AU', { timeZone: tz, timeZoneName: 'short' }).formatToParts(ms).find((x) => x.type === 'timeZoneName')?.value || tz;
+
+// "2h 15m" / "40m"
+export function duration(ms) {
+  const m = Math.max(0, Math.round(ms / 60_000));
+  return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`;
+}
+
+// ESPN's scoreboard asks for the US Eastern date as YYYYMMDD.
+export function etDateKey(pro, sp) {
+  const day = spDay(pro, sp);
+  return day == null ? null : new Date(day).toISOString().slice(0, 10).replace(/-/g, '');
+}
+
+// One game day: when it starts, when it likely ends, and where it is now.
+// `board` is the live scoreboard for that day ({ sp, games: [{ state: 'pre' | 'in' | 'post' }] }); without it
+// the state is estimated from the clock.
+export function dayInfo(pro, sp, now, board = null) {
+  const slate = pro.spSlate?.get(sp);
+  if (!slate?.length) return null;
+  const firstTip = slate[0];
+  const lastTip = slate.at(-1);
+  const live = board && board.sp === sp && board.games.length >= slate.length ? board.games : null;
+  let state;
+  let final = null;
+  if (live) {
+    final = live.filter((g) => g.state === 'post').length;
+    const playing = live.filter((g) => g.state === 'in').length;
+    state = final === live.length ? 'done' : final + playing > 0 ? 'live' : 'upcoming';
+  } else {
+    state = now < firstTip ? 'upcoming' : now >= lastTip + GAME_LENGTH ? 'done' : 'live';
+  }
+  return { sp, games: slate.length, firstTip, lastTip, likelyEnd: lastTip + LIKELY_GAME, state, final, estimated: !live };
+}
+
+// Today's slate and, once it is over (or there is none), the next one.
+export function gameDays(pro, cur, now, board = null) {
+  const today = dayInfo(pro, cur, now, board);
+  let next = null;
+  for (let sp = cur + 1; sp <= cur + 14 && !next; sp++) next = dayInfo(pro, sp, now);
+  return { today, next };
+}
+
 /* ---------- Standings ---------- */
 
 // Weekly points from 0, summing days in the week up to and including `upto`.
@@ -489,13 +555,13 @@ export function simulateWeek(rows, sims = 4000) {
 
 /* ---------- Model for the UI ---------- */
 
-export function buildModel({ league, pro, weeks, daily, dayDetail, now, source }) {
+export function buildModel({ league, pro, weeks, daily, dayDetail, now, source, dayDone }) {
   const cur = league.currentSP;
   const week = currentWeek(weeks, cur);
   const teamById = new Map(league.teams.map((t) => [t.id, t]));
   const nowSt = standings(league.teams, daily, week.sps, cur);
   const prevSt = week.sps.includes(cur - 1) ? standings(league.teams, daily, week.sps, cur - 1) : null;
-  const through = finishedThrough(league, pro, now);
+  const through = finishedThrough(league, pro, now, dayDone);
 
   const rows = league.teams.map((t) => {
     const st = nowSt.get(t.id);

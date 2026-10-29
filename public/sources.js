@@ -19,6 +19,19 @@ export function createApiSource(get) {
   };
 }
 
+// ESPN's public scoreboard (open to browsers): which games are scheduled, in play or final on a US date.
+// Returns null when it can't be reached, and the page falls back to estimating from the clock.
+export async function fetchScoreboard(sp, dateKey, fetchImpl = fetch) {
+  try {
+    const res = await fetchImpl(`https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=${dateKey}`, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return { sp, games: (body.events || []).map((e) => ({ id: e.id, start: Date.parse(e.date), state: e.status?.type?.state, detail: e.status?.type?.detail })) };
+  } catch {
+    return null;
+  }
+}
+
 export const SNAPSHOT_VERSION = 1;
 
 export function createSnapshotSource(snap) {

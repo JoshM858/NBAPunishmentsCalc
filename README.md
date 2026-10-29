@@ -51,7 +51,7 @@ GitHub Pages is static, so it can't hold secrets or call ESPN from the browser. 
 
 1. Put this project in a GitHub repository whose default branch is `main` (the workflow also runs on pushes to `main`).
 2. **Settings, then Secrets and variables, then Actions, Secrets tab**: add `ESPN_S2` and `ESPN_SWID` (skip both for a public league).
-3. Same page, **Variables tab**: add `LEAGUE_ID` and `SEASON` (for example `2027`), and optionally `WEEK_START` (default `Tuesday`) and `HIDE_TEAMS` (team IDs, abbreviations or names, comma-separated, for anyone who left the comp; hidden teams are left out of the published data too).
+3. Same page, **Variables tab**: add `LEAGUE_ID` and `SEASON` (for example `2027`), and optionally `TIMEZONE` (default `Australia/Melbourne`), `WEEK_START` (default `Tuesday`) and `HIDE_TEAMS` (team IDs, abbreviations or names, comma-separated, for anyone who left the comp; hidden teams are left out of the published data too).
 4. **Settings, then Pages**: set **Source** to **GitHub Actions**.
 5. **Actions tab, then Build and deploy, then Run workflow**. When it finishes (a minute or two) the site is at `https://<your-username>.github.io/<repo-name>/`.
 
@@ -73,6 +73,7 @@ Things to know:
 4. Worker settings, then Variables and Secrets, add:
    - `LEAGUE_ID` (text) and `SEASON` (text, `2027`)
    - `ESPN_S2` and `ESPN_SWID` (secrets, skip if the league is public)
+   - `TIMEZONE` (text, optional): time zone for game times, default `Australia/Melbourne`
    - `WEEK_START` (text, optional): the day weeks start in US Eastern time, default `Tuesday`
    - `HIDE_TEAMS` (text, optional): team IDs, abbreviations or names to leave off, comma-separated
 5. Open the `workers.dev` link. Press **Check against ESPN season totals** in the footer.
@@ -87,6 +88,7 @@ After editing anything in `public/` or `src/`, run `npm run build:dashboard` to 
 - `public/pipeline.js` loads a league through a data source (the `/api` routes, or a snapshot) and rebuilds each day's team score. If the league has a matchup feed it uses that; otherwise it reads each day's lineup and only counts players in starting slots (bench and IR don't score).
 - Each ESPN scoring period is one US Eastern calendar day. **Weeks run Tuesday to Monday** (US Eastern, so they end during Tuesday morning in Australia), starting with the Tue 20 Oct opener, unless you set `WEEK_START` to another day, or ESPN's own matchup periods look like real weeks, in which case those are used. The footer says which.
 - The Day recap shows the current US game day "so far" while its games are being played, with a switch to the last finished day. ESPN keeps a day as current for hours after its last game, so the app treats a day as finished 3.5 hours after its last tip-off, and then recaps it as final.
+- Game day card: shows when the US game day starts, when it likely finishes (last tip-off plus 2.5 hours) and whether it's finished, in **Victoria time** (`Australia/Melbourne`, set `TIMEZONE` to change it). It asks ESPN's live scoreboard whether the games are final; if that can't be reached it estimates from the clock and marks the line "estimated". When all games are final the Day recap switches to that day's final results.
 - Projection and odds: the rest of the week is simulated 4,000 times. Each player has an uncertain true scoring level (more uncertain early in the season), may miss games (ESPN's injury status sets the chance; healthy players still sit about 8% of games, and a miss tends to repeat the next game), and scores a noisy amount when he plays. Today uses the lineup as set; later days assume the best starters by expected points, chosen before knowing who sits. Each manager also gets a lineup-quality luck factor for the week. Expected points blend season average, last 15 days and ESPN's preseason projection while the sample is small. The odds are the share of simulations where each team finishes last.
 - Honest odds: `npm run backtest` replays every finished week using only what was known each morning and prints how far off the projections were. An rms z near 1.0 means the stated uncertainty matches reality; the first version scored 2.4 (far too confident), the current one about 1.2. Tight races will still be near toss-ups; that is the model being honest, not wrong. Not yet modelled: positions, games in progress, and ESPN's pre-game inactive lists.
 
