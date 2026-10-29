@@ -204,6 +204,14 @@ assert.equal(m.weeksSource, 'espn');
   assert.ok(checkTotals(teams, daily, 3)[0].ok, 'ESPN total with today');
   teams[0].seasonTotal = 360;
   assert.ok(!checkTotals(teams, daily, 3)[0].ok);
+  // Real league: ESPN's `points` stops at yesterday while `pointsLive` includes today's games so far.
+  const real = [{ id: 1, name: 'A', seasonTotal: 300, seasonLive: 352 }];
+  const r = checkTotals(real, daily, 3)[0];
+  assert.deepEqual([r.ok, r.basis, r.ours, r.espn], [true, 'finished days', 300, 300]);
+  real[0].seasonTotal = 290; // finished-days total off by 10, but the live total matches
+  assert.equal(checkTotals(real, daily, 3)[0].basis, 'including today');
+  real[0].seasonLive = 500;
+  assert.ok(!checkTotals(real, daily, 3)[0].ok, 'a genuine mismatch is still red');
 }
 
 console.log('All logic tests passed');

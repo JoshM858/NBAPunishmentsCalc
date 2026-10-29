@@ -74,6 +74,7 @@ r = build({ HIDE_TEAMS: 'Bench Mob' }, { out: `${work}/site-hidden`, cache: `${w
 assert.equal(r.status, 0, r.text);
 const hidden = read(`${work}/site-hidden/data/snapshot.json`);
 assert.ok(!hidden.includes('Mob'), 'hidden team name not published');
+assert.ok(!hidden.includes('Cooper'), 'hidden team’s owner not published');
 assert.equal(JSON.parse(hidden).league.teams.length, 9);
 assert.ok(Object.values(JSON.parse(hidden).history).every((d) => Object.keys(d).length === 9));
 

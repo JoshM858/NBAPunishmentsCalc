@@ -59,7 +59,8 @@ export function parseLeague(raw, fallbackSeason) {
       abbrev: t.abbrev || '',
       logo: t.logo || null,
       owner: owner ? owner.firstName || owner.displayName || '' : '',
-      seasonTotal: num(t.points ?? t.record?.overall?.pointsFor),
+      seasonTotal: num(t.points ?? t.record?.overall?.pointsFor), // finished days only
+      seasonLive: t.pointsLive == null ? null : num(t.pointsLive), // also counts today's games in progress
       roster: (t.roster?.entries || []).map((e) => parseEntry(e, season)),
     };
   });
@@ -138,7 +139,7 @@ export function slimLeague(raw, season, { sp, full = true }) {
     teams: (raw.teams || []).map((t) => {
       const team = { id: t.id };
       if (full) {
-        Object.assign(team, { name: t.name, location: t.location, nickname: t.nickname, abbrev: t.abbrev, logo: t.logo, owners: (t.owners || []).slice(0, 1), points: t.points });
+        Object.assign(team, { name: t.name, location: t.location, nickname: t.nickname, abbrev: t.abbrev, logo: t.logo, owners: (t.owners || []).slice(0, 1), points: t.points, pointsLive: t.pointsLive });
         if (t.record?.overall?.pointsFor != null) team.record = { overall: { pointsFor: t.record.overall.pointsFor } };
       }
       if (t.roster) {
@@ -535,7 +536,8 @@ export function weeklyResults(teams, daily, weeks, cur, pro) {
     .reverse();
 }
 
-// Compare our day-by-day rebuild with ESPN's own season totals.
+// Compare our day-by-day rebuild with ESPN's own season totals. ESPN's `points` only counts finished
+// days (`pointsLive` adds today's games in progress), so try each pairing and report the closest.
 export function checkTotals(teams, daily, uptoSP) {
   return teams.map((t) => {
     let incl = 0;
@@ -544,7 +546,12 @@ export function checkTotals(teams, daily, uptoSP) {
       if (sp <= uptoSP) incl += pts;
       if (sp < uptoSP) excl += pts;
     }
-    const diff = Math.min(Math.abs(incl - t.seasonTotal), Math.abs(excl - t.seasonTotal));
-    return { id: t.id, name: t.name, espn: r1(t.seasonTotal), ours: r1(incl), ok: diff < 0.6 };
+    const tries = [
+      { ours: excl, espn: t.seasonTotal, basis: 'finished days' },
+      { ours: incl, espn: t.seasonTotal, basis: 'including today' },
+      ...(t.seasonLive != null ? [{ ours: incl, espn: t.seasonLive, basis: 'including today' }] : []),
+    ];
+    const best = tries.reduce((a, b) => (Math.abs(b.ours - b.espn) < Math.abs(a.ours - a.espn) ? b : a));
+    return { id: t.id, name: t.name, espn: r1(best.espn), ours: r1(best.ours), basis: best.basis, ok: Math.abs(best.ours - best.espn) < 0.6 };
   });
 }

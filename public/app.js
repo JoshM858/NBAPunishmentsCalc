@@ -313,7 +313,7 @@ function renderFoot(m) {
     const bad = state.check.filter((c) => !c.ok);
     check = bad.length
       ? `<p class="warn">${plural(bad.length, 'team')} don’t match ESPN’s season total: ${bad.map((b) => `${esc(b.name)} (ESPN ${fmt(b.espn)}, rebuilt ${fmt(b.ours)})`).join('; ')}. Try <a href="?source=roster">roster mode</a>.</p>`
-      : '<p class="ok">Every team’s rebuilt total matches ESPN’s season total.</p>';
+      : `<p class="ok">Every team’s rebuilt total matches ESPN’s season total${state.check.every((c) => c.basis === 'finished days') ? ' (ESPN counts finished days only, so today isn’t in it)' : ''}.</p>`;
   }
   return `<p>Weekly points are rebuilt from ${how}, so they start at 0 each week no matter what ESPN’s season total says. Dates are US game days. ${weeks} ${refresh}</p>${check}`;
 }

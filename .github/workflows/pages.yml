@@ -1,6 +1,6 @@
 # Builds a fresh ESPN data snapshot every hour and publishes the site to GitHub Pages.
 # Needs: Settings > Pages > Source = GitHub Actions; secrets ESPN_S2 and ESPN_SWID (private leagues);
-# variables LEAGUE_ID and SEASON. See README.md.
+# variables LEAGUE_ID and SEASON (optional: HIDE_TEAMS). See README.md.
 name: Build and deploy
 
 on:
@@ -38,6 +38,7 @@ jobs:
         env:
           LEAGUE_ID: ${{ vars.LEAGUE_ID }}
           SEASON: ${{ vars.SEASON }}
+          HIDE_TEAMS: ${{ vars.HIDE_TEAMS }}
           ESPN_S2: ${{ secrets.ESPN_S2 }}
           ESPN_SWID: ${{ secrets.ESPN_SWID }}
 

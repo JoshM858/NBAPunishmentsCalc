@@ -29,9 +29,11 @@ Treat the cookies like a password. They stop working if you log out of ESPN in t
 Needs [Node](https://nodejs.org) 18 or newer. No `npm install` is required.
 
 ```bash
-cp .env.example .env     # then open .env and fill in LEAGUE_ID, SEASON, ESPN_S2, ESPN_SWID
+cp .env.example .env     # Windows: copy .env.example .env
 npm start                # http://localhost:8787
 ```
+
+Open `.env` in any text editor and fill in `LEAGUE_ID`, `SEASON`, and (private leagues only) `ESPN_S2` and `ESPN_SWID`. Restart `npm start` after changing it.
 
 `.env` is git-ignored. The server only listens on your own computer, and your cookies never reach the browser. Open `http://localhost:8787/?demo` to see the page with fake data.
 
@@ -41,7 +43,7 @@ Check that the maths lines up with ESPN, from the terminal:
 npm run check
 ```
 
-It prints the shape of ESPN's data, rebuilds the weekly points from every finished day, and compares each team with ESPN's season total. `GREEN` means they all match. Without the terminal: scroll to the page footer and press **Check against ESPN season totals**.
+It prints the shape of ESPN's data, rebuilds the weekly points from every finished day, and compares each team with ESPN's season total (ESPN's own total only counts finished days, so today's games are left out of that comparison). `GREEN` means they all match. Without the terminal: scroll to the page footer and press **Check against ESPN season totals**.
 
 ## GitHub (GitHub Pages)
 
@@ -49,7 +51,7 @@ GitHub Pages is static, so it can't hold secrets or call ESPN from the browser. 
 
 1. Put this project in a GitHub repository whose default branch is `main` (the workflow also runs on pushes to `main`).
 2. **Settings, then Secrets and variables, then Actions, Secrets tab**: add `ESPN_S2` and `ESPN_SWID` (skip both for a public league).
-3. Same page, **Variables tab**: add `LEAGUE_ID` and `SEASON` (for example `2027`).
+3. Same page, **Variables tab**: add `LEAGUE_ID` and `SEASON` (for example `2027`), and optionally `HIDE_TEAMS` (team IDs, abbreviations or names, comma-separated, for anyone who left the comp; hidden teams are left out of the published data too).
 4. **Settings, then Pages**: set **Source** to **GitHub Actions**.
 5. **Actions tab, then Build and deploy, then Run workflow**. When it finishes (a minute or two) the site is at `https://<your-username>.github.io/<repo-name>/`.
 
@@ -94,10 +96,14 @@ After editing anything in `public/` or `src/`, run `npm run build:dashboard` to 
 - **Totals don't match**: add `?source=roster` to the URL to force the lineup-based method, and run `npm run check -- --roster`.
 - **GitHub run fails**: open the run in the Actions tab. The error names the missing secret or variable, or the ESPN problem.
 
+## Season-long points leagues
+
+ESPN reports this league type (`TOTAL_SEASON_POINTS`) with no weekly matchups and one meaningless matchup period, so the page ignores it and uses Monday to Sunday weeks. Head-to-head leagues that have real weekly matchup periods use those instead, and read daily team scores from ESPN's matchup feed when it has them.
+
 ## Tests
 
 ```bash
 npm test
 ```
 
-Covers the scoring logic (including a real ESPN NBA schedule fixture and real stat-row shapes), the ESPN error handling, the snapshot build (secrets never published, caching, hidden teams) and the Cloudflare bundle. All offline.
+Covers the scoring logic (including a real ESPN NBA schedule and an anonymised real league captured with `npm run capture`), the ESPN error handling, the snapshot build (secrets never published, caching, hidden teams) and the Cloudflare bundle. All offline.

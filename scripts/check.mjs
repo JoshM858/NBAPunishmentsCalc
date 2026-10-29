@@ -50,7 +50,7 @@ try {
   line(`\nWeek ${model.week.id} (${model.week.label}), day ${model.week.dayNumber}/${model.week.days}`);
   for (const r of model.rows) line(`${String(r.rank).padStart(2)} ${r.name.padEnd(28)} week ${fmt(r.weekPts).padStart(8)}  today ${fmt(r.todayPts).padStart(6)}  proj ${fmt(r.projFinal).padStart(8)}`);
   line('\n== Check against ESPN season totals ==');
-  for (const c of check) line(`${c.ok ? 'OK ' : 'BAD'} ${c.name.padEnd(28)} ESPN ${fmt(c.espn).padStart(9)}  rebuilt ${fmt(c.ours).padStart(9)}`);
+  for (const c of check) line(`${c.ok ? 'OK ' : 'BAD'} ${c.name.padEnd(28)} ESPN ${fmt(c.espn).padStart(9)}  rebuilt ${fmt(c.ours).padStart(9)}  (${c.basis})`);
   line(check.every((c) => c.ok) ? '\nGREEN: every team matches.' : '\nRED: some teams do not match. Try --roster, and share this output.');
   if (shame.length) line(`Finished weeks: ${shame.map((w) => `wk${w.week} last=${w.losers.map((l) => l.id)}`).join(', ')}`);
   process.exit(check.every((c) => c.ok) ? 0 : 2);

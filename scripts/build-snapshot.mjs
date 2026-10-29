@@ -3,6 +3,7 @@
 // Usage: node scripts/build-snapshot.mjs [--out _site] [--cache .cache/days.json]
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadEnv } from '../src/env.js';
 import { createDirectSource } from '../src/direct-source.js';
 import { buildModel, slimLeague, slimPro } from '../public/logic.js';
@@ -13,7 +14,7 @@ const arg = (name, fallback) => {
   const i = process.argv.indexOf(`--${name}`);
   return i > -1 ? process.argv[i + 1] : fallback;
 };
-const root = new URL('../', import.meta.url).pathname;
+const root = fileURLToPath(new URL('../', import.meta.url));
 const outDir = resolve(arg('out', '_site'));
 const cacheFile = resolve(arg('cache', '.cache/days.json'));
 
@@ -76,6 +77,8 @@ try {
   const history = historyOf(ctx);
   for (const sp of Object.keys(history)) history[sp] = Object.fromEntries(Object.entries(history[sp]).filter(([tid]) => visible.has(Number(tid))));
   leagueSlim = onlyVisible(leagueSlim);
+  const owners = new Set(leagueSlim.teams.flatMap((t) => t.owners || []));
+  leagueSlim.members = (leagueSlim.members || []).filter((m) => owners.has(m.id));
   leagueSlim.schedule = (leagueSlim.schedule || []).filter((m) => visible.has(m.home?.teamId) && (!m.away || visible.has(m.away.teamId)));
   for (const sp of Object.keys(days)) days[sp] = onlyVisible(days[sp]);
 
