@@ -37,7 +37,8 @@ assert.equal(league.activeSlots, 10, '7 position slots + 3 UTIL; bench (12) and 
 assert.deepEqual(league.matchupPeriods, { 1: [1] });
 assert.equal(ctx.weeks.source, 'calendar', 'ESPN’s single matchup period is not a week');
 assert.equal(ctx.source, 'roster', 'the schedule feed has no daily points for this league type');
-assert.equal(ctx.weeks[1].sps[0], 7);
+assert.equal(ctx.weeks[1].sps[0], 8, 'week 2 starts Tuesday 27 Oct');
+assert.equal(ctx.weeks[0].sps.at(-1), 7, 'week 1 ends Monday 26 Oct');
 assert.equal(ctx.league.currentSP, real.cur);
 
 const { check, shame } = await loadSeasonDays(ctx, src);
@@ -45,13 +46,13 @@ assert.equal(check.length, real.expectedChecked);
 for (const c of check) assert.ok(c.ok, `${c.name}: ESPN ${c.espn} vs rebuilt ${c.ours}`);
 assert.ok(check.every((c) => c.basis === 'finished days'), 'ESPN’s `points` covers finished days; today is still in progress');
 
-// Weeks restart from 0: week 2 so far is only Mon-Wed of that week, not the season total
+// Weeks restart from 0: week 2 so far is only Tue-Wed of that week, not the season total
 const model = buildModel({ ...ctx, now: src.now() });
 assert.equal(model.week.id, 2);
-assert.equal(model.week.dayNumber, 3);
+assert.equal(model.week.dayNumber, 2, 'Tue 27 and Wed 28 Oct');
 for (const r of model.rows) {
   assert.ok(r.weekPts < r.seasonTotal, `${r.name} week ${r.weekPts} vs season ${r.seasonTotal}`);
-  const days = [7, 8, 9].map((sp) => ctx.daily.get(r.id).get(sp) ?? 0);
+  const days = [8, 9].map((sp) => ctx.daily.get(r.id).get(sp) ?? 0);
   assert.ok(Math.abs(days.reduce((a, b) => a + b, 0) - r.weekPts) < 0.05);
 }
 assert.equal(shame.length, 1, 'week 1 is the only finished week');

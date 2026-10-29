@@ -51,7 +51,7 @@ GitHub Pages is static, so it can't hold secrets or call ESPN from the browser. 
 
 1. Put this project in a GitHub repository whose default branch is `main` (the workflow also runs on pushes to `main`).
 2. **Settings, then Secrets and variables, then Actions, Secrets tab**: add `ESPN_S2` and `ESPN_SWID` (skip both for a public league).
-3. Same page, **Variables tab**: add `LEAGUE_ID` and `SEASON` (for example `2027`), and optionally `HIDE_TEAMS` (team IDs, abbreviations or names, comma-separated, for anyone who left the comp; hidden teams are left out of the published data too).
+3. Same page, **Variables tab**: add `LEAGUE_ID` and `SEASON` (for example `2027`), and optionally `WEEK_START` (default `Tuesday`) and `HIDE_TEAMS` (team IDs, abbreviations or names, comma-separated, for anyone who left the comp; hidden teams are left out of the published data too).
 4. **Settings, then Pages**: set **Source** to **GitHub Actions**.
 5. **Actions tab, then Build and deploy, then Run workflow**. When it finishes (a minute or two) the site is at `https://<your-username>.github.io/<repo-name>/`.
 
@@ -73,6 +73,7 @@ Things to know:
 4. Worker settings, then Variables and Secrets, add:
    - `LEAGUE_ID` (text) and `SEASON` (text, `2027`)
    - `ESPN_S2` and `ESPN_SWID` (secrets, skip if the league is public)
+   - `WEEK_START` (text, optional): the day weeks start in US Eastern time, default `Tuesday`
    - `HIDE_TEAMS` (text, optional): team IDs, abbreviations or names to leave off, comma-separated
 5. Open the `workers.dev` link. Press **Check against ESPN season totals** in the footer.
 
@@ -84,7 +85,7 @@ After editing anything in `public/` or `src/`, run `npm run build:dashboard` to 
 
 - `src/api.js` proxies ESPN's own league API (the data the ESPN site loads), only for whitelisted views, with cookies kept server-side. The same file runs in the local server, the Cloudflare Worker and the snapshot build.
 - `public/pipeline.js` loads a league through a data source (the `/api` routes, or a snapshot) and rebuilds each day's team score. If the league has a matchup feed it uses that; otherwise it reads each day's lineup and only counts players in starting slots (bench and IR don't score).
-- Each ESPN scoring period is one US Eastern calendar day. **Weeks are Monday to Sunday** (US Eastern), with the opening Tuesday-to-Sunday as week 1, unless ESPN's own matchup periods look like real weeks, in which case those are used. The footer says which.
+- Each ESPN scoring period is one US Eastern calendar day. **Weeks run Tuesday to Monday** (US Eastern, so they end during Tuesday morning in Australia), starting with the Tue 20 Oct opener, unless you set `WEEK_START` to another day, or ESPN's own matchup periods look like real weeks, in which case those are used. The footer says which.
 - Projection: remaining games for players who can start (today's set lineup, then each team's best players on later days, capped at your starting slots). Expected points blend season average, last 15 days and ESPN's preseason projection while the sample is small. Out players are skipped, day-to-day players discounted.
 - Punishment chance: 8,000 simulated finishes of the week.
 
@@ -98,7 +99,7 @@ After editing anything in `public/` or `src/`, run `npm run build:dashboard` to 
 
 ## Season-long points leagues
 
-ESPN reports this league type (`TOTAL_SEASON_POINTS`) with no weekly matchups and one meaningless matchup period, so the page ignores it and uses Monday to Sunday weeks. Head-to-head leagues that have real weekly matchup periods use those instead, and read daily team scores from ESPN's matchup feed when it has them.
+ESPN reports this league type (`TOTAL_SEASON_POINTS`) with no weekly matchups and one meaningless matchup period, so the page ignores it and uses 7-day weeks starting on `WEEK_START` (Tuesday unless you change it). Head-to-head leagues that have real weekly matchup periods use those instead, and read daily team scores from ESPN's matchup feed when it has them.
 
 ## Tests
 

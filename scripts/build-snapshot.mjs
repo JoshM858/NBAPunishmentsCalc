@@ -85,7 +85,7 @@ try {
   const snapshot = {
     version: SNAPSHOT_VERSION,
     generatedAt: new Date().toISOString(),
-    config: { configured: true, season, hideTeams: [], platform: 'static' }, // hidden teams are already removed below
+    config: { configured: true, season, hideTeams: [], weekStart: cfg.weekStart, platform: 'static' }, // hidden teams are already removed below
     league: leagueSlim,
     pro: slimPro(proRaw),
     days,

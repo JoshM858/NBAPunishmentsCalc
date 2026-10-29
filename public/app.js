@@ -25,6 +25,7 @@ const AGO = (ms) => {
   const m = Math.max(0, Math.round((Date.now() - ms) / 60_000));
   return m < 1 ? 'just now' : m < 90 ? `${m} min ago` : `${Math.round(m / 60)} hours ago`;
 };
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const STATIC_POLL = 10 * 60_000;
 const STALE_AFTER = 3 * HOUR;
 
@@ -306,7 +307,7 @@ function renderShame(m) {
 
 function renderFoot(m) {
   const how = m.source === 'schedule' ? 'ESPN’s day-by-day team scores' : 'each day’s ESPN lineup and player stats';
-  const weeks = m.weeksSource === 'espn' ? 'Weeks follow ESPN’s matchup periods.' : 'Weeks run Monday to Sunday, US Eastern time.';
+  const weeks = m.weeksSource === 'espn' ? 'Weeks follow ESPN’s matchup periods.' : `Weeks run ${DAYS[m.weekStart]} to ${DAYS[(m.weekStart + 6) % 7]}, US Eastern time.`;
   const refresh = state.src.kind === 'static' ? 'The data updates about hourly from a GitHub job; Refresh reloads the latest snapshot.' : 'Auto-refreshes hourly.';
   let check = '<button type="button" class="link" data-action="check">Check against ESPN season totals</button>';
   if (state.check) {

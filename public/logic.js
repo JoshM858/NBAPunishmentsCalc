@@ -269,9 +269,17 @@ function espnWeeks(league) {
   return median >= 5 && median <= 9 && lens.at(-1) <= 21 ? weeks : null;
 }
 
-// Weeks follow ESPN's matchup periods when they exist; otherwise Monday–Sunday in US Eastern.
-// `weeks.source` says which.
-export function buildWeeks(league, pro) {
+export const DEFAULT_WEEK_START = 2; // Tuesday: this league's weeks run Tuesday to Monday (US Eastern)
+
+// 'Tue', 'tuesday', 2 -> 2 (JS weekday, Sunday = 0). Anything unrecognised gives the default.
+export function parseWeekStart(v) {
+  const i = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].indexOf(String(v ?? '').trim().slice(0, 3).toLowerCase());
+  return i >= 0 ? i : DEFAULT_WEEK_START;
+}
+
+// Weeks follow ESPN's matchup periods when they exist; otherwise 7-day weeks starting on `weekStart`
+// (US Eastern calendar days). `weeks.source` says which.
+export function buildWeeks(league, pro, { weekStart = DEFAULT_WEEK_START } = {}) {
   const fromEspn = espnWeeks(league);
   if (fromEspn) return Object.assign(fromEspn, { source: 'espn' });
 
@@ -283,13 +291,13 @@ export function buildWeeks(league, pro) {
   for (let sp = first; sp <= last; sp++) {
     const day = spDay(pro, sp);
     if (day == null) break;
-    const monday = day - ((new Date(day).getUTCDay() + 6) % 7) * DAY_MS;
-    if (monday !== key) groups.push([]), (key = monday);
+    const start = day - ((new Date(day).getUTCDay() - weekStart + 7) % 7) * DAY_MS;
+    if (start !== key) groups.push([]), (key = start);
     groups.at(-1).push(sp);
   }
   // A short opening stub (season starts late in the week) joins week 1.
   if (groups.length > 1 && groups[0].length < 4) groups.splice(0, 2, [...groups[0], ...groups[1]]);
-  return Object.assign(groups.map((g, i) => ({ id: i + 1, sps: g })), { source: 'calendar' });
+  return Object.assign(groups.map((g, i) => ({ id: i + 1, sps: g })), { source: 'calendar', weekStart });
 }
 
 export const weekOf = (weeks, sp) => weeks.find((w) => w.sps.includes(sp)) || null;
@@ -461,6 +469,7 @@ export function buildModel({ league, pro, weeks, daily, dayDetail, now, source }
     shame: weeklyResults(league.teams, daily, weeks, cur, pro),
     source,
     weeksSource: weeks.source || null,
+    weekStart: weeks.weekStart ?? null,
   };
 }
 

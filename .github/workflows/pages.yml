@@ -39,6 +39,7 @@ jobs:
           LEAGUE_ID: ${{ vars.LEAGUE_ID }}
           SEASON: ${{ vars.SEASON }}
           HIDE_TEAMS: ${{ vars.HIDE_TEAMS }}
+          WEEK_START: ${{ vars.WEEK_START }}
           ESPN_S2: ${{ secrets.ESPN_S2 }}
           ESPN_SWID: ${{ secrets.ESPN_SWID }}
 

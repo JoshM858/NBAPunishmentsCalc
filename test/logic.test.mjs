@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createDemo } from '../public/demo.js';
 import {
-  parseLeague, parseProSchedule, parseEntry, buildWeeks, currentWeek, weekOf, dayLabel, spDay, dailyFromSchedule,
+  parseLeague, parseProSchedule, parseEntry, buildWeeks, currentWeek, weekOf, dayLabel, spDay, parseWeekStart, dailyFromSchedule,
   dayFromRoster, buildModel, checkTotals, slimLeague, slimPro,
 } from '../public/logic.js';
 import { LIVE_VIEWS, loadLeague, loadSeasonDays, neededDays, historyOf } from '../public/pipeline.js';
@@ -24,14 +24,22 @@ const realPro = parseProSchedule(JSON.parse(readFileSync(new URL('./fixtures/pro
   assert.equal(dayLabel(realPro, 46), 'Fri 4 Dec');
   assert.equal(new Date(spDay(realPro, 7)).getUTCDay(), 1, 'SP 7 is a Monday');
 
+  // This league's weeks run Tuesday to Monday (US Eastern), starting with the Tue 20 Oct opener.
   const weeks = buildWeeks({ matchupPeriods: null, firstSP: 1 }, realPro);
   assert.equal(weeks.source, 'calendar');
-  assert.deepEqual(weeks[0].sps, [1, 2, 3, 4, 5, 6], 'opening week is Tue 20 to Sun 25 Oct');
-  assert.deepEqual(weeks[1].sps, [7, 8, 9, 10, 11, 12, 13], 'week 2 is Mon 26 Oct to Sun 1 Nov');
-  assert.deepEqual(weeks[2].sps, [14, 15, 16, 17, 18, 19, 20], 'week 3 keeps the no-game Tuesday (SP 15)');
-  for (const w of weeks.slice(1, 6)) assert.equal(w.sps.length, 7);
-  for (const w of weeks.slice(1, 6)) assert.equal(new Date(spDay(realPro, w.sps[0])).getUTCDay(), 1, 'weeks start on Monday');
+  assert.deepEqual(weeks[0].sps, [1, 2, 3, 4, 5, 6, 7], 'week 1 is Tue 20 to Mon 26 Oct');
+  assert.deepEqual(weeks[1].sps, [8, 9, 10, 11, 12, 13, 14], 'week 2 is Tue 27 Oct to Mon 2 Nov');
+  assert.deepEqual(weeks[2].sps, [15, 16, 17, 18, 19, 20, 21], 'week 3 starts on the no-game Tuesday (SP 15)');
+  for (const w of weeks.slice(0, 6)) assert.equal(w.sps.length, 7);
+  for (const w of weeks.slice(0, 6)) assert.equal(new Date(spDay(realPro, w.sps[0])).getUTCDay(), 2, 'weeks start on Tuesday');
   assert.equal(weekOf(weeks, 15).id, 3);
+  assert.equal(weekOf(weeks, 14).id, 2, 'Monday night games belong to the week that is ending');
+
+  // Other start days, and the old Monday-Sunday split
+  const mon = buildWeeks({ matchupPeriods: null, firstSP: 1 }, realPro, { weekStart: parseWeekStart('Monday') });
+  assert.deepEqual(mon[0].sps, [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(mon[1].sps, [7, 8, 9, 10, 11, 12, 13]);
+  assert.deepEqual([parseWeekStart('tue'), parseWeekStart('TUESDAY'), parseWeekStart('Sun'), parseWeekStart(undefined), parseWeekStart('nonsense')], [2, 2, 0, 2, 2]);
 }
 
 /* ---------- Which weeks to trust ---------- */
@@ -122,8 +130,8 @@ assert.equal(m.recap.sp, a.cur - 1);
 assert.ok(m.recap.best && m.recap.worst);
 assert.equal(weekOf(weeks, m.recap.sp).id, 2);
 
-// 6. Week fallback (ESPN periods ignored) groups days Monday–Sunday ET and matches ESPN-style weeks
-const fw = buildWeeks({ ...league, matchupPeriods: null }, pro);
+// 6. Week fallback (ESPN periods ignored) with a Monday start matches the demo's ESPN-style weeks
+const fw = buildWeeks({ ...league, matchupPeriods: null }, pro, { weekStart: 1 });
 assert.equal(fw[0].sps.at(-1), 6, 'opening week runs to Sunday 25 Oct');
 assert.deepEqual(fw.slice(0, 5).map((w) => w.sps), weeks.slice(0, 5).map((w) => w.sps));
 assert.equal(m.weeksSource, 'espn');
@@ -132,7 +140,7 @@ assert.equal(m.weeksSource, 'espn');
 {
   const week = currentWeek(weeks, a.cur);
   assert.deepEqual(neededDays(weeks, a.cur, pro), week.sps.filter((sp) => sp < a.cur));
-  assert.deepEqual(neededDays(weeks, 14, pro), [7, 8, 9, 10, 11, 12, 13], 'on a Monday the recap needs last week');
+  assert.deepEqual(neededDays(weeks, 14, pro), [7, 8, 9, 10, 11, 12, 13], 'on the first day of a week the recap needs last week');
 }
 
 /* ---------- Slim snapshot data parses the same ---------- */

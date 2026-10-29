@@ -41,7 +41,7 @@ fake.restore();
 {
   fake = installFakeEspn();
   const { body } = await get('/api/config', { ...COOKIES, HIDE_TEAMS: 'Bench Mob, 3' });
-  assert.deepEqual(body, { configured: true, hasCookies: true, leagueId: '424242', season: 2027, platform: 'cloudflare', hideTeams: ['Bench Mob', '3'] });
+  assert.deepEqual(body, { configured: true, hasCookies: true, leagueId: '424242', season: 2027, platform: 'cloudflare', weekStart: null, hideTeams: ['Bench Mob', '3'] });
   assert.ok(!JSON.stringify(body).includes('AEBxyz123'));
   assert.equal((await get('/api/config', { LEAGUE_ID: '' })).body.configured, false);
   assert.equal((await get('/api/config', { ...COOKIES, ESPN_SWID: '' })).body.hasCookies, false, 'needs both cookies');

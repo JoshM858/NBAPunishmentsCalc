@@ -2,7 +2,7 @@
 // the snapshot builder, the check CLI and the tests all run the same code.
 // A source is { config(), league(views, { sp, fresh, past }), pro(), now(), history?(), offline? } (see sources.js).
 import {
-  parseLeague, parseProSchedule, buildWeeks, currentWeek, weekOf, dailyFromSchedule, scheduleCovers,
+  parseLeague, parseProSchedule, parseWeekStart, buildWeeks, currentWeek, weekOf, dailyFromSchedule, scheduleCovers,
   dayFromRoster, weeklyResults, checkTotals,
 } from './logic.js';
 
@@ -51,7 +51,7 @@ export async function loadLeague(src, { forceRoster = false, fresh = false, cach
   if (hide.size) league.teams = league.teams.filter((t) => ![String(t.id), t.abbrev.toLowerCase(), t.name.toLowerCase()].some((k) => hide.has(k)));
   if (!league.teams.length) throw new Error('ESPN returned a league with no teams. Check LEAGUE_ID and SEASON.');
   const pro = parseProSchedule(proRaw);
-  const weeks = buildWeeks(league, pro);
+  const weeks = buildWeeks(league, pro, { weekStart: parseWeekStart(cfg.weekStart) });
   const cur = league.currentSP;
   const needed = neededDays(weeks, cur, pro);
 

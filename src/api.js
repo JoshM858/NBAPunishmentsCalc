@@ -54,6 +54,7 @@ export async function handleApi(request, env, ctx) {
         leagueId: leagueId || null,
         season,
         platform: env.PLATFORM || 'cloudflare',
+        weekStart: env.WEEK_START || null,
         hideTeams: String(env.HIDE_TEAMS || '').split(',').map((s) => s.trim()).filter(Boolean),
       });
     }
