@@ -67,6 +67,7 @@ try {
   };
 
   const ctx = await loadLeague(rec);
+  const freeAgents = await src.freeAgents().catch(() => []); // optional: the page falls back to a typical replacement level
   if (ctx.unconfigured) fail('LEAGUE_ID is not set.');
   recording = false;
   const { check } = await loadSeasonDays(ctx, rec);
@@ -88,6 +89,7 @@ try {
     config: { configured: true, season, hideTeams: [], weekStart: cfg.weekStart, timezone: cfg.timezone, platform: 'static' }, // hidden teams are already removed below
     league: leagueSlim,
     pro: slimPro(proRaw),
+    freeAgents,
     days,
     history,
   };

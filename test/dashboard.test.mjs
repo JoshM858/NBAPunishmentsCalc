@@ -20,12 +20,27 @@ const hit = (path) => worker.fetch(new Request(`https://example.workers.dev${pat
 const page = await hit('/');
 assert.equal(page.status, 200);
 assert.match(await page.text(), /Punishment Watch/);
-for (const f of ['app.js', 'logic.js', 'pipeline.js', 'sources.js', 'demo.js', 'styles.css']) assert.equal((await hit(`/${f}`)).status, 200, f);
+for (const f of ['app.js', 'logic.js', 'pipeline.js', 'sources.js', 'trade.js', 'demo.js', 'styles.css']) assert.equal((await hit(`/${f}`)).status, 200, f);
 assert.equal((await hit('/data/snapshot.json')).status, 404);
 assert.equal((await hit('/api/config')).status, 200);
 const league = await hit('/api/league?view=mRoster&view=mTeam&fresh=1');
 assert.equal(league.status, 200);
 assert.equal((await league.json()).teams.length, 10);
+
+// Every module the page imports must be served, or the page fails to load
+const imports = new Set();
+for (const f of ['app.js', 'logic.js', 'pipeline.js', 'sources.js', 'trade.js']) {
+  for (const m of (await (await hit(`/${f}`)).text()).matchAll(/from '\.\/([\w.]+)'/g)) imports.add(m[1]);
+}
+assert.ok(imports.has('trade.js') && imports.size >= 4, [...imports].join());
+for (const f of imports) assert.equal((await hit(`/${f}`)).status, 200, `${f} is imported but not served`);
+
+// The free-agent route works through the bundled worker too
+fake.restore();
+const stub = globalThis.fetch;
+globalThis.fetch = async () => new Response(JSON.stringify({ players: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+assert.deepEqual(await (await hit('/api/free-agents?fresh=1')).json(), { players: [] });
+globalThis.fetch = stub;
 
 fake.restore();
 rmSync(`${root}.cache/dashboard-test`, { recursive: true, force: true });

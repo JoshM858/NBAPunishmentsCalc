@@ -1,5 +1,6 @@
 import { buildModel, dayInfo, dayLabel, duration, etDateKey, gameDays, localTime, validTimeZone, zoneName } from './logic.js';
 import { loadLeague, loadSeasonDays } from './pipeline.js';
+import { evaluateTrade, tradeContext } from './trade.js';
 import { createApiSource, createSnapshotSource, checkSnapshot, fetchScoreboard } from './sources.js';
 
 const HOUR = 3_600_000;
@@ -93,7 +94,7 @@ const dayCache = (cfg) => ({
 
 /* ---------- Load ---------- */
 
-const state = { tab: 'week', recapView: 'live', model: null, ctx: null, src: null, updated: 0, tried: 0, busy: false, check: null, board: null, tz: 'Australia/Melbourne' };
+const state = { tab: 'week', recapView: 'live', model: null, ctx: null, src: null, updated: 0, tried: 0, busy: false, check: null, board: null, tz: 'Australia/Melbourne', me: null, trade: { other: null, give: new Set(), get: new Set() }, fa: undefined, tradeCtx: null };
 const BOARD_POLL = 3 * 60_000;
 
 async function load({ fresh = false } = {}) {
@@ -108,6 +109,9 @@ async function load({ fresh = false } = {}) {
     const ctx = await loadLeague(src, { forceRoster: FORCE_ROSTER, fresh, cache: dayCache(cfg) });
     state.src = src;
     state.ctx = ctx;
+    state.fa = undefined;
+    state.tradeCtx = null;
+    state.me = loadMe();
     state.tz = validTimeZone(cfg.timezone) ? cfg.timezone : 'Australia/Melbourne';
     state.model = buildModel({ ...ctx, now: src.now(), dayDone: boardDone() });
     state.updated = Date.now();
@@ -116,6 +120,7 @@ async function load({ fresh = false } = {}) {
     if (src.offline) await loadSeason(); // history is already in the snapshot
     render();
     refreshBoard();
+    ensureFreeAgents();
   } catch (err) {
     renderError(err);
   } finally {
@@ -161,6 +166,7 @@ function render() {
   $('panel-week').innerHTML = renderWeek(m);
   $('panel-recap').innerHTML = renderRecap(m);
   $('panel-shame').innerHTML = renderShame(m);
+  renderTrade();
   $('foot').innerHTML = renderFoot(m);
   document.querySelector('.tabs').hidden = false;
   showTab(state.tab, false);
@@ -361,7 +367,7 @@ function renderSetup(cfg, kind = cfg?.platform === 'local' ? 'local' : 'cloudfla
       <p><a href="?demo">Preview with demo data</a></p>
     </div>`;
   document.querySelector('.tabs').hidden = true;
-  for (const p of ['week', 'recap', 'shame']) $(`panel-${p}`).hidden = true;
+  for (const p of ['week', 'recap', 'shame', 'trade']) $(`panel-${p}`).hidden = true;
 }
 
 function renderError(err) {
@@ -429,6 +435,160 @@ async function refreshBoard() {
   if (boardDone() === true && before !== true && state.src?.kind !== 'static') load({ fresh: true });
 }
 
+/* ---------- Trade ---------- */
+
+const signed = (v) => `${v < -0.05 ? '−' : '+'}${Math.abs(v).toFixed(1)}`;
+const starRow = (n) => `<span class="stars" role="img" aria-label="${n} out of 5 stars">${[1, 2, 3, 4, 5].map((i) => `<span class="star ${n >= i ? 'on' : n >= i - 0.5 ? 'half' : ''}">★</span>`).join('')}</span>`;
+const meKey = () => `pw:me:${state.ctx?.cfg?.leagueId ?? 'site'}`;
+
+function loadMe() {
+  try {
+    const id = Number(localStorage.getItem(meKey()));
+    return state.ctx.league.teams.some((t) => t.id === id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+function setMe(id) {
+  state.me = id;
+  state.trade = { other: null, give: new Set(), get: new Set() };
+  try {
+    if (id == null) localStorage.removeItem(meKey());
+    else localStorage.setItem(meKey(), String(id));
+  } catch {}
+  renderTrade();
+}
+
+// Free agents set the replacement level. Loaded once per refresh; without them a typical level is used.
+async function ensureFreeAgents() {
+  if (state.fa !== undefined || !state.src?.freeAgents) return;
+  state.fa = null;
+  try {
+    state.fa = await state.src.freeAgents();
+  } catch {
+    state.fa = [];
+  }
+  state.tradeCtx = null;
+  renderTrade();
+}
+
+const tradeCtx = () => (state.tradeCtx ||= tradeContext({ league: state.ctx.league, pro: state.ctx.pro, freeAgents: state.fa || [] }));
+
+function rosterList(team, kind, picked, ctx) {
+  const groups = [['Starting', (p) => p.slot <= 11], ['Bench', (p) => p.slot === 12], ['Injured reserve', (p) => p.slot >= 13]];
+  return groups
+    .map(([title, test]) => {
+      const rows = team.roster.filter(test).sort((a, b) => ctx.valueOf(b).ppg - ctx.valueOf(a).ppg);
+      if (!rows.length) return '';
+      const items = rows
+        .map((p) => {
+          const v = ctx.valueOf(p);
+          const inj = p.injury && p.injury !== 'ACTIVE' ? `<span class="inj">${esc(p.injury.replace(/_/g, ' ').toLowerCase())}</span>` : '';
+          return `<li><label class="pl${picked.has(p.playerId) ? ' picked' : ''}">
+              <input type="checkbox" data-trade="${kind}" data-id="${p.playerId}"${picked.has(p.playerId) ? ' checked' : ''}>
+              <span class="pn">${esc(p.name)}${inj}</span>
+              <span class="pv">${v.ppg.toFixed(1)} <small>pts/game, plays ${Math.round(v.rate * 100)}%</small></span>
+            </label></li>`;
+        })
+        .join('');
+      return `<h4 class="grp">${title}</h4><ul class="plist">${items}</ul>`;
+    })
+    .join('');
+}
+
+// { bar, details }: the bar stays pinned to the top of the tab while you tick players
+function tradeResult(me, other, ctx) {
+  const tr = state.trade;
+  if (!tr.give.size || !tr.get.size) return { bar: '<p class="hint">Tick at least one player from each team to rate the trade.</p>', details: '' };
+  const r = evaluateTrade(ctx, me, other, [...tr.give], [...tr.get]);
+  const youWin = r.winner === 'a';
+  const head = r.winner === null ? 'Dead even.' : youWin ? 'You come out ahead.' : `${esc(other.name)} comes out ahead.`;
+  const lines = [];
+  if (r.a.gain < -2) lines.push(`<p class="warn">This costs you about ${Math.abs(r.a.gain).toFixed(0)} points a week.</p>`);
+  else if (r.a.gain > 2 && r.b.gain > 2) lines.push('<p class="ok">Both teams gain, so this helps everyone.</p>');
+  for (const [who, side] of [['You', r.a], [other.name, r.b]]) {
+    if (side.mustDrop) lines.push(`<p class="warn">${esc(who)} would have ${side.mustDrop} too many players and have to drop ${side.mustDrop === 1 ? 'one' : side.mustDrop}.</p>`);
+  }
+  for (const n of r.notes) lines.push(`<p class="note">${esc(n)}</p>`);
+  const bar = `<p class="vstars">${starRow(r.stars)} <b>${r.stars} stars</b> <span class="vlabel">${esc(r.label)}</span></p>
+      <p class="vgain">You <b class="${r.a.gain < -2 ? 'neg' : 'pos'}">${signed(r.a.gain)}</b> · ${esc(other.name)} <b class="${r.b.gain < -2 ? 'neg' : 'pos'}">${signed(r.b.gain)}</b> <small>points a week</small></p>`;
+  const details = `<div class="verdict">
+      <h3>${esc(r.label)}</h3>
+      <p>${head}</p>
+      <div class="gains">
+        <p><span>You</span><b class="${r.a.gain < -2 ? 'neg' : 'pos'}">${signed(r.a.gain)}</b> points a week</p>
+        <p><span>${esc(other.name)}</span><b class="${r.b.gain < -2 ? 'neg' : 'pos'}">${signed(r.b.gain)}</b> points a week</p>
+      </div>
+      ${lines.join('')}
+      <details><summary>How the stars are worked out</summary>
+        <p class="note">Each player is valued by the points he is expected to score when he plays (his games so far, pulled toward ESPN’s preseason projection) times how often he plays. Each team’s best lineup is then compared for every remaining game day, before and after the trade, against what a free agent could give you${ctx.replacementFromData ? ' (using the real free-agent list)' : ' (a typical free agent)'}. The star rating is how unsure we are who really wins: 5 stars means it is too close to call, and fewer stars mean one side clearly wins. Injuries can swing any trade, so these are odds, not a promise. This tool only judges a trade; make the real one in ESPN.</p>
+      </details>
+    </div>`;
+  return { bar, details };
+}
+
+function renderTrade() {
+  const el = $('panel-trade');
+  if (!state.ctx) return;
+  const teams = state.ctx.league.teams;
+  const me = teams.find((t) => t.id === state.me);
+  if (!me) {
+    el.innerHTML = `<h2 class="panel-title">Who are you?</h2>
+      <p class="lede">Pick your team to see your players and test trades. This just remembers your team on this device. Everything here is already visible to the whole league, so there is no password.</p>
+      <div class="picks">${teams.map((t) => `<button type="button" class="team-pick" data-trade-act="signin" data-id="${t.id}"><b>${esc(t.name)}</b><span>${esc(t.owner)}</span></button>`).join('')}</div>`;
+    return;
+  }
+  const ctx = tradeCtx();
+  const tr = state.trade;
+  const others = teams.filter((t) => t.id !== me.id);
+  if (!others.some((t) => t.id === tr.other)) {
+    tr.other = others[0]?.id ?? null;
+    tr.give.clear();
+    tr.get.clear();
+  }
+  const other = teams.find((t) => t.id === tr.other);
+  const result = other ? tradeResult(me, other, ctx) : { bar: '', details: '' };
+  el.innerHTML = `<div class="tbar" aria-live="polite">${result.bar}</div>
+    <p class="lede">Signed in as <b>${esc(me.name)}</b>${me.owner ? ` (${esc(me.owner)})` : ''}. <button type="button" class="link" data-trade-act="signout">Not you? Switch team</button></p>
+    <h2 class="panel-title">Your players: tick who you would give</h2>
+    ${rosterList(me, 'give', tr.give, ctx)}
+    <h2 class="panel-title">Trade with
+      <select data-trade="other" aria-label="Team to trade with">${others.map((t) => `<option value="${t.id}"${t.id === tr.other ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>
+    </h2>
+    <p class="lede">Tick who you would get.</p>
+    ${other ? rosterList(other, 'get', tr.get, ctx) : ''}
+    <div class="result">${result.details}</div>`;
+}
+
+document.addEventListener('change', (e) => {
+  const input = e.target.closest('[data-trade]');
+  if (!input || !state.ctx) return;
+  const tr = state.trade;
+  if (input.dataset.trade === 'other') {
+    tr.other = Number(input.value);
+    tr.get.clear();
+  } else {
+    const set = tr[input.dataset.trade];
+    const id = Number(input.dataset.id);
+    if (input.checked) set.add(id);
+    else set.delete(id);
+  }
+  const top = window.scrollY;
+  renderTrade();
+  window.scrollTo(0, top);
+  // The panel is redrawn on every change, so put keyboard focus back where it was
+  const same = input.dataset.id ? `[data-trade="${input.dataset.trade}"][data-id="${input.dataset.id}"]` : '[data-trade="other"]';
+  $('panel-trade').querySelector(same)?.focus({ preventScroll: true });
+});
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-trade-act]');
+  if (!btn) return;
+  if (btn.dataset.tradeAct === 'signin') setMe(Number(btn.dataset.id));
+  if (btn.dataset.tradeAct === 'signout') setMe(null);
+});
+
 /* ---------- Tabs and actions ---------- */
 
 function showTab(tab, focus = true) {
@@ -490,7 +650,7 @@ document.addEventListener('visibilitychange', () => {
 
 try {
   const saved = location.hash.slice(1) || localStorage.getItem('pw:tab');
-  if (['week', 'recap', 'shame'].includes(saved)) state.tab = saved;
+  if (['week', 'recap', 'shame', 'trade'].includes(saved)) state.tab = saved;
 } catch {}
 
 load();

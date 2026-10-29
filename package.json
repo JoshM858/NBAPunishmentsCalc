@@ -11,7 +11,8 @@
     "snapshot": "node scripts/build-snapshot.mjs",
     "capture": "node scripts/capture-fixture.mjs",
     "backtest": "node scripts/backtest.mjs",
-    "test": "node test/logic.test.mjs && node test/real.test.mjs && node test/api.test.mjs && node test/snapshot.test.mjs && node test/dashboard.test.mjs",
+    "backtest:trades": "node scripts/backtest-trades.mjs",
+    "test": "node test/logic.test.mjs && node test/real.test.mjs && node test/api.test.mjs && node test/snapshot.test.mjs && node test/dashboard.test.mjs && node test/trade.test.mjs",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "build:dashboard": "node scripts/build-dashboard.mjs"

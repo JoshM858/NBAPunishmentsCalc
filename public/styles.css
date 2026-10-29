@@ -327,3 +327,46 @@ code { font-size: 0.9em; background: var(--track); padding: 0.05rem 0.3rem; over
 .chip.live { background: var(--paint); color: var(--paint-ink); }
 .chip.done { background: var(--up); color: var(--paint-ink); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Trade */
+.picks { display: grid; gap: 0.5rem; margin-top: 0.8rem; }
+.team-pick { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; text-align: left; font: inherit; padding: 0.8rem 1rem; border: 2px solid var(--ink); border-radius: 10px; background: rgba(255, 245, 230, 0.55); color: var(--ink); cursor: pointer; }
+.team-pick:hover { background: var(--ink); color: var(--floor); }
+.team-pick span { color: inherit; opacity: 0.75; font-size: 0.9rem; }
+#panel-trade h2.panel-title select { font: inherit; font-weight: 700; margin-left: 0.4rem; padding: 0.2rem 0.4rem; border: 2px solid var(--ink); border-radius: 8px; background: var(--floor); color: var(--ink); max-width: 100%; }
+.grp { margin: 1rem 0 0.3rem; font: 700 0.8rem/1 var(--display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.plist { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
+.pl { display: grid; grid-template-columns: auto 1fr auto; gap: 0.6rem; align-items: center; padding: 0.55rem 0.7rem; border: 2px solid transparent; border-radius: 10px; background: rgba(255, 245, 230, 0.5); cursor: pointer; }
+.pl.picked { border-color: var(--paint); background: var(--tint); }
+.pl input { width: 1.2rem; height: 1.2rem; accent-color: var(--paint); }
+.pn { font-weight: 600; }
+.pv { font-weight: 700; text-align: right; }
+.pv small { font-weight: 500; color: var(--muted); }
+.inj { margin-left: 0.5rem; font-size: 0.78rem; font-weight: 700; padding: 0.05rem 0.45rem; border-radius: 999px; background: var(--paint); color: var(--paint-ink); text-transform: uppercase; }
+.verdict { margin-top: 1.4rem; padding: 1rem 1.1rem; border: 3px solid var(--ink); border-radius: 12px; background: rgba(255, 245, 230, 0.75); }
+.verdict h3 { font: 800 1.7rem/1.05 var(--display); margin: 0.1rem 0 0.3rem; }
+.vstars { margin: 0; font-size: 1.1rem; }
+.stars { letter-spacing: 0.08em; font-size: 1.6rem; vertical-align: middle; }
+.star { color: var(--track); }
+.star.on { color: var(--ink); }
+.star.half { background: linear-gradient(90deg, var(--ink) 50%, var(--track) 50%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.gains { display: grid; gap: 0.2rem; margin: 0.5rem 0; }
+.gains p { margin: 0; display: flex; gap: 0.5rem; align-items: baseline; }
+.gains span { min-width: 6.5rem; color: var(--muted); }
+.gains b { font-size: 1.2rem; }
+.gains .pos { color: var(--up); }
+.gains .neg { color: var(--paint); }
+.verdict .warn { color: var(--paint); font-weight: 700; margin: 0.3rem 0; }
+.verdict .ok { color: var(--up); font-weight: 700; margin: 0.3rem 0; }
+.verdict .note { color: var(--muted); font-size: 0.9rem; margin: 0.3rem 0; }
+.verdict details { margin-top: 0.6rem; }
+.verdict summary { cursor: pointer; font-weight: 600; }
+
+.tbar { position: sticky; top: 0; z-index: 5; margin: 0 -0.2rem 0.8rem; padding: 0.55rem 0.9rem; border: 3px solid var(--ink); border-radius: 12px; background: var(--floor); box-shadow: 0 6px 0 rgba(28, 35, 64, 0.12); }
+.tbar p { margin: 0; }
+.tbar .hint { color: var(--muted); font-weight: 600; }
+.tbar .stars { font-size: 1.35rem; }
+.tbar .vlabel { font-weight: 700; margin-left: 0.3rem; }
+.tbar .vgain { font-size: 0.95rem; margin-top: 0.1rem; }
+.tbar .vgain b.pos { color: var(--up); }
+.tbar .vgain b.neg { color: var(--paint); }

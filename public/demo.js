@@ -15,6 +15,8 @@ const TEAMS = [
 const FIRST = ['Darnell', 'Tyrese', 'Marcus', 'Jalen', 'Andre', 'Kofi', 'Mateo', 'Luka', 'Dante', 'Isaiah', 'Theo', 'Malik', 'Rui', 'Cade', 'Bennett', 'Omari', 'Viktor', 'Jonah', 'Caleb', 'Xavier'];
 const LAST = ['Whitlock', 'Okafor', 'Brennan', 'Castillo', 'Hale', 'Mbeki', 'Novak', 'Reyes', 'Sutton', 'Vance', 'Adeyemi', 'Kerr', 'Lindqvist', 'Marsh', 'Prior', 'Quinlan', 'Rook', 'Tate', 'Usher', 'Yates'];
 const ACTIVE_SLOTS = [0, 1, 2, 3, 4, 5, 6, 11, 11, 11];
+// Lineup slots each position may fill (ESPN ids: PG 0, SG 1, SF 2, PF 3, C 4, G 5, F 6, SG/SF 7, G/F 8, PF/C 9, F/C 10, UTIL 11, bench 12, IR 13)
+const ELIGIBLE = [[0, 5, 8, 11, 12, 13], [1, 5, 7, 8, 11, 12, 13], [2, 6, 7, 8, 10, 11, 12, 13], [3, 6, 9, 10, 11, 12, 13], [4, 9, 10, 11, 12, 13]];
 
 function rng(seed) {
   return () => {
@@ -61,6 +63,7 @@ export function createDemo({ withSchedule = false } = {}) {
         fullName: `${FIRST[(pid * 7) % FIRST.length]} ${LAST[(pid * 13) % LAST.length]}`,
         proTeamId: 1 + Math.floor(rand() * 30),
         mu,
+        eligibleSlots: ELIGIBLE[pid % 5],
         injuryStatus: k === 13 ? 'OUT' : rand() < 0.06 ? 'DAY_TO_DAY' : 'ACTIVE',
         projAvg: mu * (0.85 + rand() * 0.3),
         games: {},
@@ -157,7 +160,7 @@ export function createDemo({ withSchedule = false } = {}) {
             entries: t.players.map((p) => ({
               playerId: p.id,
               lineupSlotId: slots[p.id],
-              playerPoolEntry: { id: p.id, player: { id: p.id, fullName: p.fullName, proTeamId: p.proTeamId, injuryStatus: p.injuryStatus, stats: playerStats(p, period) } },
+              playerPoolEntry: { id: p.id, player: { id: p.id, fullName: p.fullName, proTeamId: p.proTeamId, injuryStatus: p.injuryStatus, eligibleSlots: p.eligibleSlots, stats: playerStats(p, period) } },
             })),
           };
         }
@@ -183,6 +186,7 @@ export function createDemo({ withSchedule = false } = {}) {
     config: async () => ({ configured: true, demo: true, leagueId: 'demo', season: SEASON }),
     league: async (views, opts) => structuredClone(league(views, opts)),
     pro: async () => structuredClone(proRaw),
+    freeAgents: async () => Array.from({ length: 14 }, (_, i) => ({ playerId: 9000 + i, name: `${FIRST[i]} ${LAST[(i * 3) % LAST.length]}`, proTeamId: 1 + ((i * 7) % 30), injury: i === 2 ? 'OUT' : 'ACTIVE', seasonGP: 9, seasonAvg: 27 - i * 0.7, projAvg: 28 - i * 0.6, eligibleSlots: ELIGIBLE[i % 5] })),
     now: () => now,
     truth: { teams, CURRENT_SP },
   };

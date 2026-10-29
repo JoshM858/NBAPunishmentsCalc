@@ -25,6 +25,10 @@ export function installFakeEspn({ mode = 'ok', withSchedule = false, leagueId = 
     if (!m) return reply(404, { messages: ['Not Found'] });
     if (m[1] !== leagueId) return reply(404, { messages: ['Not Found'], details: [{ type: 'GENERAL_NOT_FOUND' }] });
     if (mode === 'private' && !cookie.includes('espn_s2=')) return reply(401, { details: [{ type: 'AUTH_LEAGUE_NOT_VISIBLE', message: 'You are not authorized to view this League.' }] });
+    if (url.searchParams.get('view') === 'kona_player_info') { // free agents, in ESPN's shape
+      const players = (await demo.freeAgents()).map((p) => ({ player: { id: p.playerId, fullName: p.name, proTeamId: p.proTeamId, injuryStatus: p.injury, eligibleSlots: p.eligibleSlots, stats: [{ id: '002027', appliedAverage: p.seasonAvg, stats: { 42: p.seasonGP } }, { id: '102027', appliedAverage: p.projAvg }] } }));
+      return reply(200, { players });
+    }
     const sp = url.searchParams.get('scoringPeriodId');
     return reply(200, await demo.league(url.searchParams.getAll('view'), { sp: sp ? Number(sp) : undefined }));
   };

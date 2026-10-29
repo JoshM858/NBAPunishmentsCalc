@@ -41,6 +41,9 @@ for (const file of [...walk(`${work}/site`), `${work}/cache.json`]) {
 // 3. The snapshot is self-sufficient: week table, recap data and the ESPN-totals check all work from it
 const snap = checkSnapshot(JSON.parse(read(`${work}/site/data/snapshot.json`)));
 assert.equal(snap.config.platform, 'static');
+assert.equal(snap.freeAgents.length, 14, 'free agents are published for the trade tab');
+assert.deepEqual(Object.keys(snap.freeAgents[0]).sort(), ['eligibleSlots', 'injury', 'name', 'playerId', 'projAvg', 'proTeamId', 'seasonAvg', 'seasonGP'].sort());
+assert.equal((await createSnapshotSource(snap).freeAgents()).length, 14);
 assert.ok(!('leagueId' in snap.config) && !('hasCookies' in snap.config));
 assert.ok(Math.abs(Date.now() - Date.parse(snap.generatedAt)) < 120_000);
 const source = createSnapshotSource(snap);

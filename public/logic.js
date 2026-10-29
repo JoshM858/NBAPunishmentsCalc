@@ -36,6 +36,7 @@ export function parseEntry(e, season) {
     injury: p.injuryStatus || 'ACTIVE',
     seasonAvg,
     seasonGP: gp,
+    eligibleSlots: p.eligibleSlots || [],
     last15Avg: num(last15?.appliedAverage),
     projAvg: num(proj?.appliedAverage),
     bySP,
@@ -48,7 +49,14 @@ export function parseLeague(raw, fallbackSeason) {
   const settings = raw.settings || {};
   const slotCounts = settings.rosterSettings?.lineupSlotCounts || {};
   let activeSlots = 0;
-  for (const [slot, count] of Object.entries(slotCounts)) if (Number(slot) <= ACTIVE_MAX_SLOT) activeSlots += num(count);
+  const slotIds = []; // one entry per starting slot, e.g. [0, 1, 2, 3, 4, 5, 6, 11, 11, 11]
+  let rosterLimit = 0;
+  for (const [slot, count] of Object.entries(slotCounts)) {
+    rosterLimit += num(count);
+    if (Number(slot) > ACTIVE_MAX_SLOT) continue;
+    activeSlots += num(count);
+    for (let i = 0; i < num(count); i++) slotIds.push(Number(slot));
+  }
 
   const teams = (raw.teams || []).map((t) => {
     const owner = members.get((t.owners || [])[0]);
@@ -71,6 +79,8 @@ export function parseLeague(raw, fallbackSeason) {
     finalSP: raw.status?.finalScoringPeriod ?? null,
     name: settings.name || 'Fantasy league',
     activeSlots: activeSlots || 10,
+    slotIds: slotIds.length ? slotIds : [0, 1, 2, 3, 4, 5, 6, 11, 11, 11],
+    rosterLimit: rosterLimit || 23,
     matchupPeriods: settings.scheduleSettings?.matchupPeriods || null,
     schedule: raw.schedule || [],
     teams,
@@ -166,7 +176,7 @@ export function slimLeague(raw, season, { sp, full = true }) {
             return {
               playerId: e.playerId ?? p.id,
               lineupSlotId: e.lineupSlotId,
-              playerPoolEntry: { player: { id: p.id, fullName: p.fullName, proTeamId: p.proTeamId, injuryStatus: p.injuryStatus, stats: (p.stats || []).filter(keepStat).map(slimStat) } },
+              playerPoolEntry: { player: { id: p.id, fullName: p.fullName, proTeamId: p.proTeamId, injuryStatus: p.injuryStatus, eligibleSlots: p.eligibleSlots, stats: (p.stats || []).filter(keepStat).map(slimStat) } },
             };
           }),
         };
@@ -405,13 +415,12 @@ export function standings(teams, daily, sps, upto = Infinity) {
 
 /* ---------- Projections ---------- */
 
-// Points per game we expect from a player: season average, nudged by last 15 days,
-// blended with ESPN's preseason projection while the sample is small.
+// Points per game we expect from a player when he plays: his games so far, pulled toward ESPN's preseason
+// projection as if it were 16 games of evidence. Fitted on last season's game logs (see README, Trade stars):
+// this predicted the rest of the season better than the raw average or the old average + last-15 blend.
 export function expectedPerGame(p) {
-  if (p.seasonGP >= 10) return p.last15Avg ? 0.6 * p.seasonAvg + 0.4 * p.last15Avg : p.seasonAvg;
-  const prior = p.projAvg || p.seasonAvg;
-  const w = p.seasonGP / 10;
-  return w * p.seasonAvg + (1 - w) * prior;
+  const prior = p.projAvg || p.seasonAvg || 0;
+  return ((p.seasonGP || 0) * (p.seasonAvg || 0) + 16 * prior) / ((p.seasonGP || 0) + 16);
 }
 
 /* ---------- Week simulation ---------- */

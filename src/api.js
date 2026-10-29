@@ -76,6 +76,34 @@ export async function handleApi(request, env, ctx) {
       return new Response(JSON.stringify({ events }), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=30' } });
     }
 
+    // Best players nobody owns, for working out what a replacement is worth. Trimmed to what the page reads.
+    if (url.pathname === '/api/free-agents') {
+      if (!leagueId) return json({ error: 'LEAGUE_ID is not set.' }, 500);
+      const filter = {
+        players: {
+          filterStatus: { value: ['FREEAGENT', 'WAIVERS'] },
+          limit: 60,
+          sortAppliedStatTotal: { sortAsc: false, sortPriority: 1, value: `10${season}` }, // by preseason projection
+          filterStatsForTopScoringPeriodIds: { value: 5, additionalValue: [`00${season}`, `10${season}`] },
+        },
+      };
+      const target = `${ESPN}/${season}/segments/0/leagues/${leagueId}?view=kona_player_info`;
+      const res = await proxy(target, { cookie, ctx, ttl: 600, fresh: url.searchParams.get('fresh') === '1', what: 'league', season, leagueId, headers: { 'x-fantasy-filter': JSON.stringify(filter) }, variant: '#fa' });
+      if (!res.ok) return res;
+      const stat = (p, id) => p.stats?.find((s) => s.id === id);
+      const players = ((await res.json()).players || []).map((e) => ({
+        playerId: e.player.id,
+        name: e.player.fullName,
+        proTeamId: e.player.proTeamId,
+        injury: e.player.injuryStatus || 'ACTIVE',
+        seasonGP: stat(e.player, `00${season}`)?.stats?.['42'] ?? 0,
+        seasonAvg: stat(e.player, `00${season}`)?.appliedAverage ?? 0,
+        projAvg: stat(e.player, `10${season}`)?.appliedAverage ?? 0,
+        eligibleSlots: e.player.eligibleSlots || [],
+      }));
+      return new Response(JSON.stringify({ players }), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=300' } });
+    }
+
     if (url.pathname === '/api/league') {
       if (!leagueId) return json({ error: 'LEAGUE_ID is not set.' }, 500);
       if (!/^\d{1,10}$/.test(leagueId) || Number(leagueId) > 2147483647) {
@@ -101,15 +129,15 @@ export async function handleApi(request, env, ctx) {
   }
 }
 
-async function proxy(target, { cookie = '', ctx, ttl, fresh, what, season, leagueId }) {
+async function proxy(target, { cookie = '', ctx, ttl, fresh, what, season, leagueId, headers: extra = {}, variant = '' }) {
   const cache = globalThis.caches?.default ?? memoryCache;
-  const key = new Request(`https://espn-cache.invalid/${encodeURIComponent(target)}`);
+  const key = new Request(`https://espn-cache.invalid/${encodeURIComponent(target)}${variant}`);
   if (!fresh) {
     const hit = await cache.match(key).catch(() => null);
     if (hit) return hit;
   }
 
-  const headers = { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 (fantasy-punishment-tracker)' };
+  const headers = { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 (fantasy-punishment-tracker)', ...extra };
   if (cookie) headers.Cookie = cookie;
 
   const res = await fetch(target, { headers, redirect: 'manual' });

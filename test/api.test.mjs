@@ -162,6 +162,28 @@ for (const [mode, status, pattern] of [
   globalThis.fetch = real;
 }
 
+// Free agents: trimmed, asks ESPN with the filter header, and is cached apart from other requests
+{
+  const real = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (input, init = {}) => {
+    seen.push({ url: String(input), filter: init.headers?.['x-fantasy-filter'] });
+    return new Response(JSON.stringify({ players: [{ id: 1, status: 'FREEAGENT', player: { id: 7, fullName: 'Free Agent', proTeamId: 3, injuryStatus: 'OUT', eligibleSlots: [0, 5], draftRanksByRankType: { big: 1 }, stats: [{ id: '002027', appliedAverage: 21.5, stats: { 42: 6, 0: 99 } }, { id: '102027', appliedAverage: 30 }] } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const r = await get('/api/free-agents?fresh=1');
+  assert.equal(r.res.status, 200);
+  assert.deepEqual(r.body, { players: [{ playerId: 7, name: 'Free Agent', proTeamId: 3, injury: 'OUT', seasonGP: 6, seasonAvg: 21.5, projAvg: 30, eligibleSlots: [0, 5] }] });
+  const filter = JSON.parse(seen[0].filter);
+  assert.deepEqual(filter.players.filterStatus.value, ['FREEAGENT', 'WAIVERS']);
+  assert.match(seen[0].url, /view=kona_player_info$/);
+  assert.equal((await get('/api/free-agents', { LEAGUE_ID: '' })).res.status, 500);
+  globalThis.fetch = async () => new Response('{}', { status: 404 });
+  const missing = await get('/api/free-agents?fresh=1', { LEAGUE_ID: '555' });
+  assert.equal(missing.res.status, 404);
+  assert.match(missing.body.error, /league 555/);
+  globalThis.fetch = real;
+}
+
 // .env parsing
 assert.deepEqual(
   parseEnv('# comment\nLEAGUE_ID=123456\r\nSEASON = 2027 # this year\nESPN_S2="AEB%2Bxyz=="\nexport ESPN_SWID={ABC-123}\n\nBAD LINE\nHIDE_TEAMS=\n'),
