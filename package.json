@@ -1,0 +1,20 @@
+{
+  "name": "fantasy-punishment",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "check": "node scripts/check.mjs",
+    "snapshot": "node scripts/build-snapshot.mjs",
+    "test": "node test/logic.test.mjs && node test/api.test.mjs && node test/snapshot.test.mjs && node test/dashboard.test.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "build:dashboard": "node scripts/build-dashboard.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

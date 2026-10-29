@@ -1,0 +1,3 @@
+# Copy to .dev.vars for `npm run dev` (local only, git-ignored). Use `wrangler secret put` for the live site.
+ESPN_S2=paste-espn_s2-here
+ESPN_SWID={PASTE-SWID-WITH-BRACES}

@@ -1,0 +1,60 @@
+# Builds a fresh ESPN data snapshot every hour and publishes the site to GitHub Pages.
+# Needs: Settings > Pages > Source = GitHub Actions; secrets ESPN_S2 and ESPN_SWID (private leagues);
+# variables LEAGUE_ID and SEASON. See README.md.
+name: Build and deploy
+
+on:
+  schedule:
+    - cron: '7 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Finished days never change, so keep them between runs instead of asking ESPN again.
+      - uses: actions/cache@v4
+        with:
+          path: .cache
+          key: espn-days-${{ github.run_id }}
+          restore-keys: espn-days-
+
+      - name: Build site and data snapshot
+        run: node scripts/build-snapshot.mjs --out _site
+        env:
+          LEAGUE_ID: ${{ vars.LEAGUE_ID }}
+          SEASON: ${{ vars.SEASON }}
+          ESPN_S2: ${{ secrets.ESPN_S2 }}
+          ESPN_SWID: ${{ secrets.ESPN_SWID }}
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
