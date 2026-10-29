@@ -10,6 +10,7 @@
     "check": "node scripts/check.mjs",
     "snapshot": "node scripts/build-snapshot.mjs",
     "capture": "node scripts/capture-fixture.mjs",
+    "backtest": "node scripts/backtest.mjs",
     "test": "node test/logic.test.mjs && node test/real.test.mjs && node test/api.test.mjs && node test/snapshot.test.mjs && node test/dashboard.test.mjs",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",

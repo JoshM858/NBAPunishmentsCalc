@@ -87,8 +87,8 @@ After editing anything in `public/` or `src/`, run `npm run build:dashboard` to 
 - `public/pipeline.js` loads a league through a data source (the `/api` routes, or a snapshot) and rebuilds each day's team score. If the league has a matchup feed it uses that; otherwise it reads each day's lineup and only counts players in starting slots (bench and IR don't score).
 - Each ESPN scoring period is one US Eastern calendar day. **Weeks run Tuesday to Monday** (US Eastern, so they end during Tuesday morning in Australia), starting with the Tue 20 Oct opener, unless you set `WEEK_START` to another day, or ESPN's own matchup periods look like real weeks, in which case those are used. The footer says which.
 - The Day recap shows the current US game day "so far" while its games are being played, with a switch to the last finished day. ESPN keeps a day as current for hours after its last game, so the app treats a day as finished 3.5 hours after its last tip-off, and then recaps it as final.
-- Projection: remaining games for players who can start (today's set lineup, then each team's best players on later days, capped at your starting slots). Expected points blend season average, last 15 days and ESPN's preseason projection while the sample is small. Out players are skipped, day-to-day players discounted.
-- Punishment chance: 8,000 simulated finishes of the week.
+- Projection and odds: the rest of the week is simulated 4,000 times. Each player has an uncertain true scoring level (more uncertain early in the season), may miss games (ESPN's injury status sets the chance; healthy players still sit about 8% of games, and a miss tends to repeat the next game), and scores a noisy amount when he plays. Today uses the lineup as set; later days assume the best starters by expected points, chosen before knowing who sits. Each manager also gets a lineup-quality luck factor for the week. Expected points blend season average, last 15 days and ESPN's preseason projection while the sample is small. The odds are the share of simulations where each team finishes last.
+- Honest odds: `npm run backtest` replays every finished week using only what was known each morning and prints how far off the projections were. An rms z near 1.0 means the stated uncertainty matches reality; the first version scored 2.4 (far too confident), the current one about 1.2. Tight races will still be near toss-ups; that is the model being honest, not wrong. Not yet modelled: positions, games in progress, and ESPN's pre-game inactive lists.
 
 ## Troubleshooting
 
@@ -108,4 +108,4 @@ ESPN reports this league type (`TOTAL_SEASON_POINTS`) with no weekly matchups an
 npm test
 ```
 
-Covers the scoring logic (including a real ESPN NBA schedule and an anonymised real league captured with `npm run capture`), the ESPN error handling, the snapshot build (secrets never published, caching, hidden teams) and the Cloudflare bundle. All offline.
+Covers the scoring logic, the week simulation, a guard that the loser odds stay calibrated against a real replayed week (including a real ESPN NBA schedule and an anonymised real league captured with `npm run capture`), the ESPN error handling, the snapshot build (secrets never published, caching, hidden teams) and the Cloudflare bundle. All offline.

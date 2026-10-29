@@ -4,7 +4,6 @@ export const ACTIVE_MAX_SLOT = 11; // ESPN basketball lineup slots 0–11 score;
 export const IR_SLOT = 13;
 const ET = 'America/New_York';
 const DAY_MS = 86_400_000;
-const GAME_SD = 0.35; // per-game spread as a share of a player's average
 
 export const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : Number(v) || 0);
 export const r1 = (v) => Math.round(v * 10) / 10;
@@ -340,24 +339,6 @@ export function standings(teams, daily, sps, upto = Infinity) {
 
 /* ---------- Projections ---------- */
 
-export function injuryFactor(status) {
-  switch (String(status || 'ACTIVE').toUpperCase()) {
-    case 'OUT':
-    case 'SUSPENSION':
-    case 'INJURY_RESERVE':
-      return 0;
-    case 'DOUBTFUL':
-      return 0.25;
-    case 'QUESTIONABLE':
-      return 0.55;
-    case 'DAY_TO_DAY':
-    case 'GTD':
-      return 0.7;
-    default:
-      return 1;
-  }
-}
-
 // Points per game we expect from a player: season average, nudged by last 15 days,
 // blended with ESPN's preseason projection while the sample is small.
 export function expectedPerGame(p) {
@@ -367,38 +348,91 @@ export function expectedPerGame(p) {
   return w * p.seasonAvg + (1 - w) * prior;
 }
 
-// Remaining expected points for the week. Today uses the lineup as set (unstarted games only);
-// later days assume the best `activeSlots` players with games get started.
-export function projectTeam(team, { week, currentSP, pro, now, activeSlots }) {
-  let mean = 0;
-  let variance = 0;
-  let games = 0;
-  const players = new Set();
+/* ---------- Week simulation ---------- */
 
-  for (const sp of week.sps) {
-    if (sp < currentSP) continue;
-    const options = [];
-    for (const p of team.roster) {
-      if (p.slot === IR_SLOT) continue;
+// Fitted on a real week (see test/backtest). Players miss games, and a miss tends to repeat.
+export const MODEL = {
+  gameCV: 0.4, // spread of a player's points in a game he plays, as a share of his average (measured: 0.40)
+  base: 0.035, // chance a healthy player sits out after playing; with `persist` this settles at ~8% of games missed (measured: 9%)
+  persist: 0.6, // chance he also misses the next one, once he has missed
+  outPersist: 0.9, // same, for a player ESPN lists as out
+  levelSd: 0.2, // uncertainty in a player's true average before any games (shrinks as games are played)
+  levelFloor: 0.05, // role and usage can change, whatever the sample
+  later: 0.97, // days not yet set: managers miss slots, positions don't line up
+  teamSd: 0.07, // how well a manager sets lineups all week (teams scored 85-96% of their best lineup)
+};
+
+// Chance a player misses his next game, from ESPN's injury status.
+export function missChance(status) {
+  switch (String(status || 'ACTIVE').toUpperCase()) {
+    case 'OUT':
+    case 'SUSPENSION':
+    case 'INJURY_RESERVE':
+      return 1;
+    case 'DOUBTFUL':
+      return 0.85;
+    case 'QUESTIONABLE':
+      return 0.45;
+    case 'DAY_TO_DAY':
+    case 'GTD':
+      return 0.35;
+    default:
+      return MODEL.base;
+  }
+}
+
+// Relative uncertainty in a player's true scoring level: the prior, shrunk by the games he has played.
+export const levelSd = (gp) => Math.sqrt(1 / (1 / MODEL.levelSd ** 2 + gp / MODEL.gameCV ** 2) + MODEL.levelFloor ** 2);
+
+// What a team can still score this week. Today uses the lineup as set (games not yet started); later
+// days assume the best `activeSlots` players by expected points get started, chosen before knowing who sits.
+// Returns the expected points plus the plan the simulation draws from.
+export function projectTeam(team, { week, currentSP, pro, now, activeSlots }) {
+  const days = week.sps.filter((sp) => sp >= currentSP);
+  const cands = [];
+  for (const p of team.roster) {
+    if (p.slot === IR_SLOT) continue;
+    const mu = expectedPerGame(p);
+    if (mu <= 0) continue;
+    const persist = missChance(p.injury) >= 1 ? MODEL.outPersist : MODEL.persist;
+    let miss = missChance(p.injury);
+    const games = [];
+    for (const sp of days) {
       const g = pro.games.get(p.proTeamId)?.get(sp);
-      if (!g) continue;
-      const f = injuryFactor(p.injury);
-      if (!f) continue;
-      if (sp === currentSP && (g.date <= now || p.slot > ACTIVE_MAX_SLOT)) continue;
-      const mu = expectedPerGame(p);
-      if (mu <= 0) continue;
-      options.push({ p, mu, f });
+      if (!g || (sp === currentSP && g.date <= now)) continue; // no game, or already played (its points are in the total)
+      games.push({ sp, miss, picked: false, today: sp === currentSP && p.slot <= ACTIVE_MAX_SLOT });
+      miss = miss * persist + (1 - miss) * MODEL.base;
     }
-    const picked = sp === currentSP ? options : options.sort((a, b) => b.mu * b.f - a.mu * a.f).slice(0, activeSlots);
-    for (const { p, mu, f } of picked) {
-      const sd = GAME_SD * mu;
-      mean += f * mu;
-      variance += f * (sd * sd + mu * mu) - f * f * mu * mu;
-      games += 1;
-      players.add(p.playerId);
+    if (games.length) cands.push({ p, mu, persist, games });
+  }
+
+  for (const sp of days) {
+    const here = cands.map((c) => ({ c, g: c.games.find((x) => x.sp === sp) })).filter((x) => x.g && x.g.miss < 0.999);
+    if (sp === currentSP) {
+      for (const { g } of here) g.picked = g.today; // the lineup as set
+    } else {
+      here.sort((a, b) => b.c.mu * (1 - b.g.miss) - a.c.mu * (1 - a.g.miss));
+      for (const { g } of here.slice(0, activeSlots)) g.picked = true;
     }
   }
-  return { mean: r1(mean), sd: Math.sqrt(variance), games, players: players.size };
+
+  let mean = 0;
+  let games = 0;
+  const players = new Set();
+  const plan = [];
+  for (const c of cands) {
+    if (!c.games.some((g) => g.picked)) continue;
+    plan.push({ mu: c.mu, levelSd: levelSd(c.p.seasonGP), persist: c.persist, games: c.games.map((g) => ({ ...g, w: g.sp === currentSP ? 1 : MODEL.later })) });
+    for (const g of c.games) {
+      if (!g.picked) continue;
+      mean += c.mu * (1 - g.miss) * (g.sp === currentSP ? 1 : MODEL.later);
+      if (g.miss < 0.5) {
+        games += 1; // "games left" counts games he is likely to play; a long shot still adds to the mean
+        players.add(c.p.playerId);
+      }
+    }
+  }
+  return { mean: r1(mean), games, players: players.size, plan };
 }
 
 function mulberry32(seed) {
@@ -411,24 +445,46 @@ function mulberry32(seed) {
   };
 }
 
-// Chance each team finishes the week last (Monte Carlo, seeded so it doesn't jitter between renders).
-export function punishmentOdds(rows, sims = 8000) {
+// Plays the rest of the week many times: each player gets a true level (uncertain), then a chain of
+// played/missed games, then a noisy score per game he plays. Returns each team's chance of finishing last
+// and the spread of its remaining points. Seeded so the numbers don't jitter between renders.
+export function simulateWeek(rows, sims = 4000) {
   let seed = 7;
   for (const r of rows) seed = (Math.imul(seed, 31) + Math.round(r.current * 10 + r.mean * 7)) | 0;
   const rand = mulberry32(seed);
   const gauss = () => Math.sqrt(-2 * Math.log(rand() || 1e-12)) * Math.cos(2 * Math.PI * rand());
+  const sigma2 = Math.log(1 + MODEL.gameCV ** 2);
+  const sigma = Math.sqrt(sigma2);
   const hits = new Map(rows.map((r) => [r.id, 0]));
+  const sum = new Map(rows.map((r) => [r.id, 0]));
+  const sumSq = new Map(rows.map((r) => [r.id, 0]));
   for (let i = 0; i < sims; i++) {
     let min = Infinity;
     let losers = [];
     for (const r of rows) {
-      const v = r.current + r.mean + (r.sd ? r.sd * gauss() : 0);
+      let rest = 0;
+      const manager = Math.exp(MODEL.teamSd * gauss() - (MODEL.teamSd * MODEL.teamSd) / 2);
+      for (const pl of r.plan || []) {
+        const level = Math.exp(pl.levelSd * gauss() - (pl.levelSd * pl.levelSd) / 2);
+        let missed = false;
+        for (const g of pl.games) {
+          missed = rand() < (g === pl.games[0] ? g.miss : missed ? pl.persist : MODEL.base);
+          if (!missed && g.picked) rest += pl.mu * level * g.w * Math.exp(sigma * gauss() - sigma2 / 2);
+        }
+      }
+      rest *= manager;
+      sum.set(r.id, sum.get(r.id) + rest);
+      sumSq.set(r.id, sumSq.get(r.id) + rest * rest);
+      const v = r.current + rest;
       if (v < min - 1e-9) (min = v), (losers = [r.id]);
       else if (Math.abs(v - min) <= 1e-9) losers.push(r.id);
     }
     for (const id of losers) hits.set(id, hits.get(id) + 1 / losers.length);
   }
-  return new Map([...hits].map(([id, n]) => [id, n / sims]));
+  return new Map(rows.map((r) => {
+    const m = sum.get(r.id) / sims;
+    return [r.id, { odds: hits.get(r.id) / sims, mean: m, sd: Math.sqrt(Math.max(0, sumSq.get(r.id) / sims - m * m)) }];
+  }));
 }
 
 /* ---------- Model for the UI ---------- */
@@ -456,14 +512,18 @@ export function buildModel({ league, pro, weeks, daily, dayDetail, now, source }
       todayPts: r1(daily.get(t.id)?.get(cur) ?? 0),
       projRemaining: proj.mean,
       projFinal: r1(st.pts + proj.mean),
-      sd: proj.sd,
+      plan: proj.plan,
       gamesLeft: proj.games,
       playersLeft: proj.players,
     };
   });
 
-  const odds = punishmentOdds(rows.map((r) => ({ id: r.id, current: r.weekPts, mean: r.projRemaining, sd: r.sd })));
-  for (const r of rows) r.odds = odds.get(r.id);
+  const sim = simulateWeek(rows.map((r) => ({ id: r.id, current: r.weekPts, mean: r.projRemaining, plan: r.plan })));
+  for (const r of rows) {
+    r.odds = sim.get(r.id).odds;
+    r.sd = sim.get(r.id).sd;
+    delete r.plan;
+  }
   rows.sort((a, b) => a.rank - b.rank || b.projFinal - a.projFinal);
 
   const byProj = [...rows].sort((a, b) => b.projFinal - a.projFinal);

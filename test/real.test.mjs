@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { buildModel, dayFromRoster, parseEntry, parseLeague } from '../public/logic.js';
 import { loadLeague, loadSeasonDays } from '../public/pipeline.js';
+import { replay } from '../scripts/backtest.mjs';
 
 const load = (f) => JSON.parse(readFileSync(new URL(`./fixtures/${f}`, import.meta.url), 'utf8'));
 const real = load('real-league.json');
@@ -76,6 +77,17 @@ assert.ok(Math.abs(sum - w1.losers[0].pts) < 0.05);
     assert.equal(r.weekPts, model.rows.find((x) => x.id === r.id).weekPts, 'recap and This week agree');
     assert.ok(r.dayPts > 150, `${r.name}: a full day, not the ${r.dayPts} from the day before`);
   }
+}
+
+// Guard the loser odds: replay the finished week with only what was known each morning. The model's stated
+// uncertainty must match how far off it really was (an overconfident model used to score rms z 2.4).
+{
+  const r = replay();
+  assert.equal(r.weeks, 1);
+  assert.ok(r.rmsZ > 0.7 && r.rmsZ < 1.5, `rms z ${r.rmsZ.toFixed(2)}: the odds are ${r.rmsZ >= 1.5 ? 'overconfident' : 'too cautious'}`);
+  assert.ok(Math.abs(r.bias) < 60, `projections lean ${r.bias.toFixed(0)} points`);
+  assert.ok(r.meanAbsError < 150, `mean error ${r.meanAbsError.toFixed(0)} points`);
+  assert.ok(r.minOddsOnActualLoser > 0.005, 'the team that finished last was never written off completely (the old model gave it 0%)');
 }
 
 console.log('All real-data tests passed');

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createDemo } from '../public/demo.js';
 import {
-  parseLeague, parseProSchedule, parseEntry, buildWeeks, currentWeek, weekOf, dayLabel, spDay, parseWeekStart, isDayDone, dailyFromSchedule,
+  parseLeague, parseProSchedule, parseEntry, buildWeeks, currentWeek, weekOf, dayLabel, spDay, parseWeekStart, isDayDone, projectTeam, simulateWeek, missChance, levelSd, MODEL, dailyFromSchedule,
   dayFromRoster, buildModel, checkTotals, slimLeague, slimPro,
 } from '../public/logic.js';
 import { LIVE_VIEWS, loadLeague, loadSeasonDays, neededDays, historyOf } from '../public/pipeline.js';
@@ -233,6 +233,66 @@ assert.equal(m.weeksSource, 'espn');
     assert.ok(Math.abs(r.weekPts - week) < 0.05, 'week total includes the finished day');
   }
   assert.equal(after.week.dayNumber, during.week.dayNumber, 'the This week tab is unchanged');
+}
+
+/* ---------- Week simulation ---------- */
+
+{
+  const sps = [10, 11, 12, 13];
+  const week = { sps };
+  const proAll = { games: new Map([[1, new Map(sps.map((sp) => [sp, { date: sp * 1e6, opp: 2 }]))]]) };
+  const player = (id, mu, extra = {}) => ({ playerId: id, proTeamId: 1, slot: 0, injury: 'ACTIVE', seasonAvg: mu, seasonGP: 20, last15Avg: mu, projAvg: mu, ...extra });
+  const roster = (...ps) => ({ roster: ps });
+  const opts = { week, currentSP: 10, pro: proAll, now: 0, activeSlots: 10 };
+
+  // Availability: injury status drives the chance of missing, and a miss tends to repeat
+  assert.equal(missChance('OUT'), 1);
+  assert.equal(missChance('ACTIVE'), MODEL.base);
+  assert.ok(missChance('QUESTIONABLE') > missChance('GTD') && missChance('DOUBTFUL') > missChance('QUESTIONABLE'));
+  const healthy = projectTeam(roster(player(1, 40)), opts);
+  const doubtful = projectTeam(roster(player(1, 40, { injury: 'DOUBTFUL' })), opts);
+  const out = projectTeam(roster(player(1, 40, { injury: 'OUT' })), opts);
+  assert.ok(healthy.mean > doubtful.mean && doubtful.mean > out.mean);
+  assert.equal(out.games, 0, 'a player ruled out is not counted as a game left');
+  assert.ok(out.mean < 40 * 0.2 * 4, 'out today still has a small chance to return later in the week');
+  // Healthy players still sit ~8% of the time, so four games project below four full games
+  assert.ok(healthy.mean < 40 * 3.97 && healthy.mean > 40 * 3.4, `healthy mean ${healthy.mean}`);
+
+  // Today: only the lineup as set counts; a benched player isn't started today but is picked on later days
+  const bench = projectTeam(roster(player(1, 40, { slot: 12 })), opts);
+  assert.equal(bench.games, 3);
+  // Games already started are excluded (their points are in the total)
+  assert.equal(projectTeam(roster(player(1, 40)), { ...opts, now: 10e6 + 1 }).games, 3);
+
+  // Only `activeSlots` players start on a later day (today uses the lineup as set, and these are all benched)
+  const many = projectTeam(roster(...Array.from({ length: 12 }, (_, i) => player(i, 30 + i, { slot: 12 }))), { ...opts, currentSP: 11, activeSlots: 3 });
+  assert.equal(many.games, 6);
+
+  // Less certainty about a player with few games
+  assert.ok(levelSd(0) > levelSd(5) && levelSd(5) > levelSd(40) && levelSd(500) >= MODEL.levelFloor);
+
+  // The simulation: odds add up to 1, the trailing team is likelier to lose, results are repeatable
+  const plan = projectTeam(roster(...Array.from({ length: 10 }, (_, i) => player(i, 35))), opts);
+  const rows = [
+    { id: 'a', current: 500, mean: plan.mean, plan: plan.plan },
+    { id: 'b', current: 400, mean: plan.mean, plan: plan.plan },
+    { id: 'c', current: 700, mean: plan.mean, plan: plan.plan },
+  ];
+  const sim = simulateWeek(rows);
+  assert.ok(Math.abs([...sim.values()].reduce((s, v) => s + v.odds, 0) - 1) < 1e-9);
+  assert.ok(sim.get('b').odds > sim.get('a').odds && sim.get('a').odds > sim.get('c').odds, 'order follows the standings');
+  assert.ok(sim.get('b').odds > 0.55 && sim.get('b').odds < 0.8, '100 behind with four days left is likely, not certain');
+  const gap = (g) => simulateWeek([{ ...rows[0], id: 'lead', current: 500 }, { ...rows[1], id: 'trail', current: 500 - g }]).get('trail').odds;
+  assert.ok(gap(200) > 0.75 && gap(200) < 0.92 && gap(500) > 0.98, 'odds grow with the gap, and a 500 gap is near-decisive');
+  assert.deepEqual([...simulateWeek(rows)], [...sim], 'seeded, so it does not jitter');
+  const close = simulateWeek([{ ...rows[0], current: 500 }, { ...rows[1], current: 520 }]);
+  assert.ok(close.get('a').odds > 0.4 && close.get('a').odds < 0.7, 'a 20-point gap is close to a toss-up');
+  assert.ok(sim.get('a').mean > plan.mean * 0.9 && sim.get('a').mean < plan.mean * 1.1, 'simulated mean agrees with the projection');
+  assert.ok(sim.get('a').sd > 50, 'a team’s remaining points are genuinely uncertain');
+
+  // No remaining games: the result is decided, ties split
+  const done = simulateWeek([{ id: 'x', current: 10, mean: 0, plan: [] }, { id: 'y', current: 20, mean: 0, plan: [] }, { id: 'z', current: 10, mean: 0, plan: [] }]);
+  assert.deepEqual([done.get('x').odds, done.get('y').odds, done.get('z').odds], [0.5, 0, 0.5]);
 }
 
 /* ---------- checkTotals tolerates today being in or out ---------- */

@@ -279,7 +279,7 @@ function renderRecap(m) {
     </table></div>
     ${players}
     <h3 class="panel-sub">${sameWeek ? 'Rest of the week' : `Week ${m.week.id} outlook`}</h3>
-    <p class="lede">Remaining games are counted only for players who can start: today’s set lineup, then each team’s best available players on later days. Injured players marked out are skipped.</p>
+    <p class="lede">The rest of the week is simulated: today’s set lineup, then each team’s best players on later days. Injured players are discounted, healthy ones still sit out about 1 game in 12, and a close race stays close.</p>
     <div class="scroll"><table>
       <thead><tr><th scope="col">Team</th><th scope="col" class="num">Games</th><th scope="col" class="num">Players</th><th scope="col" class="num">Projected</th><th scope="col" class="num">Risk</th></tr></thead>
       <tbody>${rest}</tbody>
