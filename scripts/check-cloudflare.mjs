@@ -48,7 +48,7 @@ async function run(label, port, configArgs) {
     const home = await get('/');
     check(home.res.status === 200 && home.text.includes('Punishment Watch'), 'serves the page');
     const imports = new Set();
-    for (const f of ['app.js', 'logic.js', 'pipeline.js', 'sources.js', 'trade.js']) for (const m of (await get(`/${f}`)).text.matchAll(/from '\.\/([\w.]+)'/g)) imports.add(m[1]);
+    for (const f of ['app.js', 'logic.js', 'pipeline.js', 'sources.js', 'trade.js', 'trade-ui.js']) for (const m of (await get(`/${f}`)).text.matchAll(/from '\.\/([\w.-]+)'/g)) imports.add(m[1]);
     const missing = [];
     for (const f of imports) if ((await get(`/${f}`)).res.status !== 200) missing.push(f);
     check(!missing.length, `serves every module the page imports (${[...imports].join(', ')})`);

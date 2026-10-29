@@ -245,16 +245,9 @@ export function tradeSummary(result, { a, b, give, get }) {
   ].join('\n');
 }
 
-// Judge a trade: A gives `giveIds` and gets `getIds` from B. Returns each side's gain in points a week,
-// the winner, the stars and plain-language notes.
-export function evaluateTrade(ctx, teamA, teamB, giveIds, getIds) {
-  const g = tradeGains(teamA.roster, teamB.roster, giveIds, getIds, ctx);
-  const players = giveIds.length + getIds.length;
-  const gap = g.a - g.b;
-  const stars = starsFor(gap, players);
-  const side = (team, rosterSize, gain) => ({ id: team.id, name: team.name, gain, rosterAfter: rosterSize, mustDrop: Math.max(0, rosterSize - ctx.rosterLimit) });
+// Plain-language warnings about injured players who are changing teams.
+function injuryNotes(ctx, moving) {
   const notes = [];
-  const moving = [...teamA.roster.filter((p) => giveIds.includes(p.playerId)), ...teamB.roster.filter((p) => getIds.includes(p.playerId))];
   for (const p of moving) {
     const s = String(p.injury || 'ACTIVE').toUpperCase();
     const ret = ctx.returnOf(p);
@@ -263,10 +256,21 @@ export function evaluateTrade(ctx, teamA, teamB, giveIds, getIds) {
     else if (ret != null) {
       const n = ctx.missed(p);
       notes.push(`${p.name} is out until about ${shortDate(ret)}${what ? ` (${what})` : ''}${n > 0 ? `, so he misses about ${n} ${n === 1 ? 'game' : 'games'}` : ''}.${ctx.guessOf(p) ? ' ESPN has no firm timetable, so that date is a guess.' : ''}`);
-    }
-    else if (OUT_STATUSES.has(s)) notes.push(`${p.name} is out right now, so he adds nothing until he returns.`);
+    } else if (OUT_STATUSES.has(s)) notes.push(`${p.name} is out right now, so he adds nothing until he returns.`);
     else if (s !== 'ACTIVE') notes.push(`${p.name} is listed as ${s.replace(/_/g, ' ').toLowerCase()}.`);
   }
+  return notes;
+}
+
+// Judge a trade: A gives `giveIds` and gets `getIds` from B. Returns each side's gain in points a week,
+// the winner, the stars and plain-language notes.
+export function evaluateTrade(ctx, teamA, teamB, giveIds, getIds) {
+  const g = tradeGains(teamA.roster, teamB.roster, giveIds, getIds, ctx);
+  const players = giveIds.length + getIds.length;
+  const gap = g.a - g.b;
+  const stars = starsFor(gap, players);
+  const side = (team, rosterSize, gain) => ({ id: team.id, name: team.name, gain, rosterAfter: rosterSize, mustDrop: Math.max(0, rosterSize - ctx.rosterLimit) });
+  const notes = injuryNotes(ctx, [...teamA.roster.filter((p) => giveIds.includes(p.playerId)), ...teamB.roster.filter((p) => getIds.includes(p.playerId))]);
   return {
     a: side(teamA, g.rosterA, g.a),
     b: side(teamB, g.rosterB, g.b),
@@ -277,4 +281,55 @@ export function evaluateTrade(ctx, teamA, teamB, giveIds, getIds) {
     players,
     notes,
   };
+}
+
+// A trade between two or more teams. `teams`: [{ id, name, roster }]; `moves`: [{ playerId, from, to }] with team ids.
+// Each team's gain is its change in points a week; the rating comes from the spread between the team that gains
+// most and the team that gains least (for two teams that is exactly the gap used by evaluateTrade).
+export function evaluateMultiTrade(ctx, teams, moves) {
+  const byId = new Map(teams.map((t) => [t.id, t]));
+  const owner = new Map();
+  for (const t of teams) for (const p of t.roster) owner.set(p.playerId, { team: t.id, player: p });
+  const valid = moves.filter((m) => owner.get(m.playerId)?.team === m.from && byId.has(m.to) && m.to !== m.from);
+  const weeks = Math.max(1, ctx.days.length / 7);
+  const involved = new Set(valid.flatMap((m) => [m.from, m.to]));
+  const rows = teams.map((t) => {
+    const leaving = new Set(valid.filter((m) => m.from === t.id).map((m) => m.playerId));
+    const arriving = valid.filter((m) => m.to === t.id).map((m) => owner.get(m.playerId).player);
+    const after = [...t.roster.filter((p) => !leaving.has(p.playerId)), ...arriving];
+    const gain = involved.has(t.id) ? (rosterValue(after, ctx.days, ctx) - rosterValue(t.roster, ctx.days, ctx)) / weeks : 0;
+    return { id: t.id, name: t.name, gain, involved: involved.has(t.id), rosterAfter: after.length, mustDrop: Math.max(0, after.length - ctx.rosterLimit) };
+  });
+  const active = rows.filter((r) => r.involved);
+  const hi = active.reduce((a, b) => (b.gain > a.gain ? b : a), active[0] || { gain: 0 });
+  const lo = active.reduce((a, b) => (b.gain < a.gain ? b : a), active[0] || { gain: 0 });
+  const spread = active.length ? hi.gain - lo.gain : 0;
+  const stars = starsFor(spread, valid.length);
+  return {
+    teams: rows,
+    spread,
+    stars,
+    label: verdict(stars),
+    players: valid.length,
+    winnerId: spread < 2 ? null : hi.id,
+    loserId: spread < 2 ? null : lo.id,
+    notes: injuryNotes(ctx, valid.map((m) => owner.get(m.playerId).player)),
+    idle: rows.filter((r) => !r.involved).map((r) => r.id),
+  };
+}
+
+// Group-chat text for a multi-way trade: who sends which players where, and how it rates.
+export function multiSummary(result, moves) {
+  const name = (id) => result.teams.find((t) => t.id === id)?.name ?? `Team ${id}`;
+  const gain = (v) => `${v < -0.05 ? '−' : '+'}${Math.abs(v).toFixed(1)}`;
+  const lines = ['Trade idea (from Punishment Watch)'];
+  for (const t of result.teams.filter((r) => r.involved)) {
+    const sent = moves.filter((m) => m.from === t.id);
+    if (sent.length) lines.push(`${t.name} sends: ${sent.map((m) => `${m.name} to ${name(m.to)}`).join(', ')}`);
+  }
+  const edge = result.winnerId == null ? 'Dead even.' : `Biggest winner: ${name(result.winnerId)}. Biggest loser: ${name(result.loserId)}.`;
+  lines.push(`Rating: ${result.stars} out of 5 stars, ${result.label.toLowerCase()}. ${edge}`);
+  lines.push(result.teams.filter((r) => r.involved).map((t) => `${t.name} ${gain(t.gain)}`).join(', ') + ' points a week.');
+  lines.push('Expected lineup points over the rest of the season; injuries can swing any trade.');
+  return lines.join('\n');
 }

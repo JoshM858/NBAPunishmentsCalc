@@ -1,6 +1,6 @@
 import { buildModel, dayInfo, dayLabel, duration, etDateKey, gameDays, localTime, validTimeZone, zoneName } from './logic.js';
 import { loadLeague, loadSeasonDays } from './pipeline.js';
-import { evaluateTrade, shortDate, tradeContext, tradeSummary } from './trade.js';
+import { createTradeUI } from './trade-ui.js';
 import { createApiSource, createSnapshotSource, checkSnapshot, fetchScoreboard } from './sources.js';
 
 const HOUR = 3_600_000;
@@ -94,7 +94,8 @@ const dayCache = (cfg) => ({
 
 /* ---------- Load ---------- */
 
-const state = { tab: 'week', recapView: 'live', model: null, ctx: null, src: null, updated: 0, tried: 0, busy: false, check: null, board: null, tz: 'Australia/Melbourne', pins: false, pending: null, pinError: '', lastTrade: null, me: null, trade: { other: null, give: new Set(), get: new Set() }, fa: undefined, tradeCtx: null };
+const state = { tab: 'week', recapView: 'live', model: null, ctx: null, src: null, updated: 0, tried: 0, busy: false, check: null, board: null, tz: 'Australia/Melbourne' };
+const trade = createTradeUI({ panel: $('panel-trade'), data: () => ({ ctx: state.ctx, src: state.src }) });
 const BOARD_POLL = 3 * 60_000;
 
 async function load({ fresh = false } = {}) {
@@ -109,10 +110,7 @@ async function load({ fresh = false } = {}) {
     const ctx = await loadLeague(src, { forceRoster: FORCE_ROSTER, fresh, cache: dayCache(cfg) });
     state.src = src;
     state.ctx = ctx;
-    state.fa = undefined;
-    state.tradeCtx = null;
-    state.pins = Boolean(cfg.pins);
-    state.me = state.pins ? await serverMe() : loadMe();
+    await trade.reset(cfg.pins);
     state.tz = validTimeZone(cfg.timezone) ? cfg.timezone : 'Australia/Melbourne';
     state.model = buildModel({ ...ctx, now: src.now(), dayDone: boardDone() });
     state.updated = Date.now();
@@ -121,7 +119,7 @@ async function load({ fresh = false } = {}) {
     if (src.offline) await loadSeason(); // history is already in the snapshot
     render();
     refreshBoard();
-    ensureFreeAgents();
+    trade.prefetch();
   } catch (err) {
     renderError(err);
   } finally {
@@ -167,7 +165,7 @@ function render() {
   $('panel-week').innerHTML = renderWeek(m);
   $('panel-recap').innerHTML = renderRecap(m);
   $('panel-shame').innerHTML = renderShame(m);
-  renderTrade();
+  trade.render();
   $('foot').innerHTML = renderFoot(m);
   document.querySelector('.tabs').hidden = false;
   showTab(state.tab, false);
@@ -436,251 +434,12 @@ async function refreshBoard() {
   if (boardDone() === true && before !== true && state.src?.kind !== 'static') load({ fresh: true });
 }
 
-/* ---------- Trade ---------- */
-
-const signed = (v) => `${v < -0.05 ? '−' : '+'}${Math.abs(v).toFixed(1)}`;
-const starRow = (n) => `<span class="stars" role="img" aria-label="${n} out of 5 stars">${[1, 2, 3, 4, 5].map((i) => `<span class="star ${n >= i ? 'on' : n >= i - 0.5 ? 'half' : ''}">★</span>`).join('')}</span>`;
-const meKey = () => `pw:me:${state.ctx?.cfg?.leagueId ?? 'site'}`;
-
-function loadMe() {
-  try {
-    const id = Number(localStorage.getItem(meKey()));
-    return state.ctx.league.teams.some((t) => t.id === id) ? id : null;
-  } catch {
-    return null;
-  }
-}
-
-// With team PINs on, the server remembers who you are (a signed cookie), not this browser.
-async function serverMe() {
-  try {
-    const id = (await (await fetch('api/me', { cache: 'no-store' })).json()).teamId;
-    return state.ctx.league.teams.some((t) => t.id === id) ? id : null;
-  } catch {
-    return null;
-  }
-}
-
-async function signInWithPin(id, pin) {
-  state.pinError = '';
-  try {
-    const res = await fetch('api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamId: id, pin }) });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      state.pinError = body.error || 'Couldn’t sign in. Try again.';
-      return renderTrade();
-    }
-    state.pending = null;
-    state.me = id;
-    state.trade = { other: null, give: new Set(), get: new Set() };
-    renderTrade();
-  } catch {
-    state.pinError = 'Couldn’t reach the server. Try again.';
-    renderTrade();
-  }
-}
-
-async function signOut() {
-  if (state.pins) await fetch('api/logout', { method: 'POST' }).catch(() => {});
-  state.pending = null;
-  state.pinError = '';
-  setMe(null);
-}
-
-function setMe(id) {
-  state.me = id;
-  state.trade = { other: null, give: new Set(), get: new Set() };
-  try {
-    if (id == null) localStorage.removeItem(meKey());
-    else localStorage.setItem(meKey(), String(id));
-  } catch {}
-  renderTrade();
-}
-
-// Free agents set the replacement level. Loaded once per refresh; without them a typical level is used.
-async function ensureFreeAgents() {
-  if (state.fa !== undefined || !state.src?.freeAgents) return;
-  state.fa = null;
-  try {
-    state.fa = await state.src.freeAgents();
-  } catch {
-    state.fa = [];
-  }
-  state.tradeCtx = null;
-  renderTrade();
-}
-
-const tradeCtx = () => (state.tradeCtx ||= tradeContext({ league: state.ctx.league, pro: state.ctx.pro, freeAgents: state.fa || [], injuries: state.ctx.injuries }));
-
-function rosterList(team, kind, picked, ctx) {
-  const groups = [['Starting', (p) => p.slot <= 11], ['Bench', (p) => p.slot === 12], ['Injured reserve', (p) => p.slot >= 13]];
-  return groups
-    .map(([title, test]) => {
-      const rows = team.roster.filter(test).sort((a, b) => ctx.valueOf(b).ppg - ctx.valueOf(a).ppg);
-      if (!rows.length) return '';
-      const items = rows
-        .map((p) => {
-          const v = ctx.valueOf(p);
-          const back = ctx.returnOf(p);
-          const status = p.injury && p.injury !== 'ACTIVE' ? p.injury.replace(/_/g, ' ').toLowerCase() : back ? 'hurt' : '';
-          const inj = status ? `<span class="inj">${esc(status)}${back ? `, back ~${shortDate(back)}` : ''}</span>` : '';
-          return `<li><label class="pl${picked.has(p.playerId) ? ' picked' : ''}">
-              <input type="checkbox" data-trade="${kind}" data-id="${p.playerId}"${picked.has(p.playerId) ? ' checked' : ''}>
-              <span class="pn">${esc(p.name)}${inj}</span>
-              <span class="pv">${v.ppg.toFixed(1)} <small>pts/game, plays ${Math.round(v.rate * 100)}%</small></span>
-            </label></li>`;
-        })
-        .join('');
-      return `<h4 class="grp">${title}</h4><ul class="plist">${items}</ul>`;
-    })
-    .join('');
-}
-
-// { bar, details }: the bar stays pinned to the top of the tab while you tick players
-function tradeResult(me, other, ctx) {
-  const tr = state.trade;
-  if (!tr.give.size || !tr.get.size) return { bar: '<p class="hint">Tick at least one player from each team to rate the trade.</p>', details: '' };
-  const r = evaluateTrade(ctx, me, other, [...tr.give], [...tr.get]);
-  const nameOf = (team, ids) => team.roster.filter((p) => ids.has(p.playerId)).map((p) => p.name);
-  state.lastTrade = { text: tradeSummary(r, { a: me.name, b: other.name, give: nameOf(me, tr.give), get: nameOf(other, tr.get) }) };
-  const espn = state.ctx.cfg.leagueId ? `<a class="link" href="https://fantasy.espn.com/basketball/league?leagueId=${encodeURIComponent(state.ctx.cfg.leagueId)}" target="_blank" rel="noopener">Open the league in ESPN to make the trade</a>` : '';
-  const youWin = r.winner === 'a';
-  const head = r.winner === null ? 'Dead even.' : youWin ? 'You come out ahead.' : `${esc(other.name)} comes out ahead.`;
-  const lines = [];
-  if (r.a.gain < -2) lines.push(`<p class="warn">This costs you about ${Math.abs(r.a.gain).toFixed(0)} points a week.</p>`);
-  else if (r.a.gain > 2 && r.b.gain > 2) lines.push('<p class="ok">Both teams gain, so this helps everyone.</p>');
-  for (const [who, side] of [['You', r.a], [other.name, r.b]]) {
-    if (side.mustDrop) lines.push(`<p class="warn">${esc(who)} would have ${side.mustDrop} too many players and have to drop ${side.mustDrop === 1 ? 'one' : side.mustDrop}.</p>`);
-  }
-  for (const n of r.notes) lines.push(`<p class="note">${esc(n)}</p>`);
-  const bar = `<p class="vstars">${starRow(r.stars)} <b>${r.stars} stars</b> <span class="vlabel">${esc(r.label)}</span></p>
-      <p class="vgain">You <b class="${r.a.gain < -2 ? 'neg' : 'pos'}">${signed(r.a.gain)}</b> · ${esc(other.name)} <b class="${r.b.gain < -2 ? 'neg' : 'pos'}">${signed(r.b.gain)}</b> <small>points a week</small></p>`;
-  const details = `<div class="verdict">
-      <h3>${esc(r.label)}</h3>
-      <p>${head}</p>
-      <div class="gains">
-        <p><span>You</span><b class="${r.a.gain < -2 ? 'neg' : 'pos'}">${signed(r.a.gain)}</b> points a week</p>
-        <p><span>${esc(other.name)}</span><b class="${r.b.gain < -2 ? 'neg' : 'pos'}">${signed(r.b.gain)}</b> points a week</p>
-      </div>
-      ${lines.join('')}
-      <p class="actions"><button type="button" class="action" data-trade-act="copy">Copy trade summary</button> ${espn}</p>
-      <details><summary>How the stars are worked out</summary>
-        <p class="note">Each player is valued by the points he is expected to score when he plays (his games so far, pulled toward ESPN’s preseason projection) times how often he plays. Each team’s best lineup is then compared for every remaining game day, before and after the trade, against what a free agent could give you${ctx.replacementFromData ? ' (using the real free-agent list)' : ' (a typical free agent)'}. The star rating is how unsure we are who really wins: 5 stars means it is too close to call, and fewer stars mean one side clearly wins. Injuries can swing any trade, so these are odds, not a promise. This tool only judges a trade; make the real one in ESPN.</p>
-      </details>
-    </div>`;
-  return { bar, details };
-}
-
-function renderTrade() {
-  const el = $('panel-trade');
-  if (!state.ctx) return;
-  const teams = state.ctx.league.teams;
-  const me = teams.find((t) => t.id === state.me);
-  if (!me) {
-    const pending = state.pins ? teams.find((t) => t.id === state.pending) : null;
-    const intro = state.pins
-      ? 'Pick your team and enter its PIN to see your players and test trades. Ask the league organiser if you don’t know it.'
-      : 'Pick your team to see your players and test trades. This just remembers your team on this device. Everything here is already visible to the whole league, so there is no password.';
-    const pinForm = pending
-      ? `<form class="pin" data-trade-form="pin">
-          <label for="pin-input">PIN for <b>${esc(pending.name)}</b></label>
-          <input id="pin-input" type="password" inputmode="numeric" autocomplete="off" maxlength="12" required>
-          <button type="submit" class="action">Sign in</button>
-          ${state.pinError ? `<p class="warn" role="alert">${esc(state.pinError)}</p>` : ''}
-        </form>`
-      : '';
-    el.innerHTML = `<h2 class="panel-title">Who are you?</h2>
-      <p class="lede">${intro}</p>
-      <div class="picks">${teams.map((t) => `<button type="button" class="team-pick${pending?.id === t.id ? ' picked' : ''}" data-trade-act="signin" data-id="${t.id}"><b>${esc(t.name)}</b><span>${esc(t.owner)}</span></button>`).join('')}</div>
-      ${pinForm}`;
-    if (pending) el.querySelector('#pin-input')?.focus({ preventScroll: true });
-    return;
-  }
-  const ctx = tradeCtx();
-  const tr = state.trade;
-  const others = teams.filter((t) => t.id !== me.id);
-  if (!others.some((t) => t.id === tr.other)) {
-    tr.other = others[0]?.id ?? null;
-    tr.give.clear();
-    tr.get.clear();
-  }
-  const other = teams.find((t) => t.id === tr.other);
-  const result = other ? tradeResult(me, other, ctx) : { bar: '', details: '' };
-  el.innerHTML = `<div class="tbar" aria-live="polite">${result.bar}</div>
-    <p class="lede">Signed in as <b>${esc(me.name)}</b>${me.owner ? ` (${esc(me.owner)})` : ''}. <button type="button" class="link" data-trade-act="signout">Not you? Switch team</button></p>
-    <h2 class="panel-title">Your players: tick who you would give</h2>
-    ${rosterList(me, 'give', tr.give, ctx)}
-    <h2 class="panel-title">Trade with
-      <select data-trade="other" aria-label="Team to trade with">${others.map((t) => `<option value="${t.id}"${t.id === tr.other ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>
-    </h2>
-    <p class="lede">Tick who you would get.</p>
-    ${other ? rosterList(other, 'get', tr.get, ctx) : ''}
-    <div class="result">${result.details}</div>`;
-}
-
-document.addEventListener('change', (e) => {
-  const input = e.target.closest('[data-trade]');
-  if (!input || !state.ctx) return;
-  const tr = state.trade;
-  if (input.dataset.trade === 'other') {
-    tr.other = Number(input.value);
-    tr.get.clear();
-  } else {
-    const set = tr[input.dataset.trade];
-    const id = Number(input.dataset.id);
-    if (input.checked) set.add(id);
-    else set.delete(id);
-  }
-  const top = window.scrollY;
-  renderTrade();
-  window.scrollTo(0, top);
-  // The panel is redrawn on every change, so put keyboard focus back where it was
-  const same = input.dataset.id ? `[data-trade="${input.dataset.trade}"][data-id="${input.dataset.id}"]` : '[data-trade="other"]';
-  $('panel-trade').querySelector(same)?.focus({ preventScroll: true });
-});
-
-document.addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-trade-act]');
-  if (!btn) return;
-  if (btn.dataset.tradeAct === 'signin') {
-    if (state.pins) {
-      state.pending = Number(btn.dataset.id);
-      state.pinError = '';
-      renderTrade();
-    } else setMe(Number(btn.dataset.id));
-  }
-  if (btn.dataset.tradeAct === 'signout') signOut();
-  if (btn.dataset.tradeAct === 'copy') copyTrade(btn);
-});
-
-document.addEventListener('submit', (e) => {
-  if (e.target.closest('[data-trade-form=pin]') && state.pending != null) {
-    e.preventDefault();
-    signInWithPin(state.pending, e.target.querySelector('input').value);
-  }
-});
-
-async function copyTrade(btn) {
-  const text = state.lastTrade?.text;
-  if (!text) return;
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    const box = Object.assign(document.createElement('textarea'), { value: text });
-    document.body.append(box);
-    box.select();
-    document.execCommand('copy');
-    box.remove();
-  }
-  btn.textContent = 'Copied. Paste it into the group chat';
-  setTimeout(() => (btn.textContent = 'Copy trade summary'), 2500);
-}
-
 /* ---------- Tabs and actions ---------- */
 
 function showTab(tab, focus = true) {
   state.tab = tab;
   try { localStorage.setItem('pw:tab', tab); } catch {}
+  document.body.classList.toggle('wide', tab === 'trade'); // side-by-side rosters need room
   for (const btn of document.querySelectorAll('[role=tab]')) {
     const on = btn.dataset.tab === tab;
     btn.setAttribute('aria-selected', on);

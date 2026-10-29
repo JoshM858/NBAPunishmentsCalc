@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseLeague, parseProSchedule } from '../public/logic.js';
 import {
-  STARS, TRADE, assign, dayPicks, dayValue, evaluateTrade, maxMatching, normalCdf, playChance, playerValue, rosterValue,
+  STARS, TRADE, assign, dayPicks, dayValue, evaluateMultiTrade, evaluateTrade, maxMatching, multiSummary, normalCdf, playChance, playerValue, rosterValue,
   starsFor, teamGamesThrough, tradeContext, tradeGains, tradeSummary, verdict, winnerConfidence, shortDate,
 } from '../public/trade.js';
 import { injuryMap } from '../public/logic.js';
@@ -277,6 +277,71 @@ const near = (a, b, eps = 1e-6, msg) => assert.ok(Math.abs(a - b) <= eps, `${msg
   // injured free agents (or ones due back later) cannot set the replacement level
   const onlyHurt = tradeContext({ league, pro, freeAgents: real.freeAgents.filter((p) => injuries.get(p.playerId)?.returnMs > withDates.dayMs(withDates.days[0])), injuries });
   assert.equal(onlyHurt.replacementFromData, false);
+}
+
+/* ---------- Multi-way trades ---------- */
+
+{
+  const days = Array.from({ length: 14 }, (_, i) => i + 1);
+  const mk = (id, v, name = `P${id}`) => ({ playerId: id, name, v, slots: [0, 1, 11, 12, 13], injury: 'ACTIVE' });
+  const ctx = { days, slotIds: [0, 1, 11], r: 5, plays: () => true, item: (p) => ({ v: p.v, slots: p.slots, outNow: false }), rosterLimit: 4, returnOf: () => null, guessOf: () => false, missed: () => 0, seasonEnd: 0 };
+  const A = { id: 1, name: 'Alpha', roster: [mk(1, 40), mk(2, 30), mk(3, 20)] };
+  const B = { id: 2, name: 'Bravo', roster: [mk(4, 38), mk(5, 12), mk(6, 8)] };
+  const C = { id: 3, name: 'Charlie', roster: [mk(7, 25), mk(8, 22), mk(9, 15)] };
+  const move = (playerId, from, to) => ({ playerId, from, to });
+
+  // Two teams: identical to the two-team evaluation
+  const two = evaluateMultiTrade(ctx, [A, B], [move(1, 1, 2), move(5, 2, 1)]);
+  const old = evaluateTrade(ctx, A, B, [1], [5]);
+  near(two.teams[0].gain, old.a.gain, 1e-9);
+  near(two.teams[1].gain, old.b.gain, 1e-9);
+  near(two.spread, Math.abs(old.gap), 1e-9);
+  assert.equal(two.stars, old.stars);
+  assert.equal(two.winnerId, old.winner === 'a' ? 1 : 2);
+  assert.equal(two.players, 2);
+
+  // Three teams in a circle: A sends 1 to B, B sends 4 to C, C sends 7 to A
+  const circle = evaluateMultiTrade(ctx, [A, B, C], [move(1, 1, 2), move(4, 2, 3), move(7, 3, 1)]);
+  assert.equal(circle.teams.length, 3);
+  assert.ok(circle.teams.every((t) => t.involved));
+  assert.equal(circle.players, 3);
+  // A swaps a 40 for a 25, B a 38 for a 40, C a 25 for a 38: B and C gain, A loses
+  assert.equal(circle.loserId, 1);
+  assert.ok(circle.teams.find((t) => t.id === 1).gain < 0);
+  assert.ok(circle.teams.find((t) => t.id === 3).gain > 0);
+  assert.equal(circle.winnerId, circle.teams.reduce((a, b) => (b.gain > a.gain ? b : a)).id);
+  near(circle.spread, Math.max(...circle.teams.map((t) => t.gain)) - Math.min(...circle.teams.map((t) => t.gain)), 1e-9);
+  assert.equal(circle.stars, starsFor(circle.spread, 3));
+  assert.deepEqual(circle.idle, []);
+
+  // A team not in any swap is reported as idle and gains nothing
+  const idle = evaluateMultiTrade(ctx, [A, B, C], [move(1, 1, 2), move(5, 2, 1)]);
+  assert.deepEqual(idle.idle, [3]);
+  assert.equal(idle.teams.find((t) => t.id === 3).gain, 0);
+  assert.equal(idle.teams.find((t) => t.id === 3).involved, false);
+
+  // Players can all go to one team, and others just give
+  const gift = evaluateMultiTrade(ctx, [A, B, C], [move(1, 1, 3), move(4, 2, 3)]);
+  assert.ok(gift.teams.find((t) => t.id === 3).gain > 0 && gift.teams.find((t) => t.id === 1).gain < 0);
+  assert.equal(gift.teams.find((t) => t.id === 3).mustDrop, 1, 'C would hold 5 players on a limit of 4');
+
+  // Nonsense is ignored rather than crashing: unknown player, wrong owner, to the same team, unknown team
+  const junk = evaluateMultiTrade(ctx, [A, B], [move(1, 1, 2), move(5, 2, 1), move(999, 1, 2), move(2, 2, 1), move(3, 1, 1), move(3, 1, 77)]);
+  assert.equal(junk.players, 2);
+  near(junk.spread, two.spread, 1e-9);
+  const empty = evaluateMultiTrade(ctx, [A, B], []);
+  assert.deepEqual([empty.spread, empty.players, empty.winnerId, empty.stars], [0, 0, null, 5]);
+  assert.equal(evaluateMultiTrade(ctx, [A, B], [move(1, 1, 2), move(5, 2, 1)]).label, two.label);
+
+  // Dead even trades have no winner
+  const same = evaluateMultiTrade(ctx, [{ id: 1, name: 'A', roster: [mk(1, 30), mk(2, 20)] }, { id: 2, name: 'B', roster: [mk(3, 30), mk(4, 20)] }], [move(1, 1, 2), move(3, 2, 1)]);
+  assert.equal(same.winnerId, null);
+
+  // Group-chat text
+  const text = multiSummary(circle, [{ ...move(1, 1, 2), name: 'Wemby' }, { ...move(4, 2, 3), name: 'Cade' }, { ...move(7, 3, 1), name: 'Curry' }]);
+  assert.match(text, /^Trade idea \(from Punishment Watch\)\nAlpha sends: Wemby to Bravo\nBravo sends: Cade to Charlie\nCharlie sends: Curry to Alpha\n/);
+  assert.match(text, /Biggest winner: \w+\. Biggest loser: Alpha\./);
+  assert.match(text, /Alpha −/);
 }
 
 /* ---------- The message you can paste into the group chat ---------- */

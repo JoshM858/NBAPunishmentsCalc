@@ -9,7 +9,7 @@ const read = (p) => readFileSync(new URL(p, root), 'utf8');
 const types = { html: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8' };
 
 const files = Object.fromEntries(
-  ['index.html', 'styles.css', 'app.js', 'logic.js', 'pipeline.js', 'sources.js', 'trade.js', 'demo.js'].map((f) => [`/${f}`, [types[f.split('.').pop()], read(`public/${f}`)]]),
+  ['index.html', 'styles.css', 'app.js', 'logic.js', 'pipeline.js', 'sources.js', 'trade.js', 'trade-ui.js', 'demo.js'].map((f) => [`/${f}`, [types[f.split('.').pop()], read(`public/${f}`)]]),
 );
 const api = read('src/api.js').replace('export async function handleApi', 'async function handleApi');
 

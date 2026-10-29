@@ -376,3 +376,41 @@ code { font-size: 0.9em; background: var(--track); padding: 0.05rem 0.3rem; over
 .pin .warn { color: var(--paint); font-weight: 700; margin: 0; }
 .team-pick.picked { background: var(--ink); color: var(--floor); }
 .actions { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: center; margin: 0.8rem 0 0.2rem; }
+
+/* Trade: your team on the left, the other teams on the right, rosters side by side */
+body.wide main { max-width: 80rem; }
+.split { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 1.2rem; align-items: start; }
+.split .panel-title, .tcol h3 { margin-top: 0.4rem; }
+.cards { display: grid; gap: 0.5rem; }
+.team-card { display: grid; gap: 0.1rem; text-align: left; font: inherit; padding: 0.7rem 0.9rem; border: 2px solid var(--ink); border-radius: 10px; background: rgba(255, 245, 230, 0.55); color: var(--ink); cursor: pointer; }
+.team-card:hover, .team-card:focus-visible { background: var(--ink); color: var(--floor); }
+.team-card span, .team-card small { opacity: 0.75; font-size: 0.85rem; }
+.cols { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 0.8rem; align-items: start; }
+.tcol { min-width: 0; padding: 0.4rem 0.5rem 0.6rem; border: 2px solid var(--ink); border-radius: 12px; background: rgba(255, 245, 230, 0.35); }
+.tcol.mine { border-color: var(--paint); }
+.tcol h3 { font: 800 1.15rem/1.1 var(--display); margin: 0.2rem 0 0.1rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; }
+.tcol h3 select { font: inherit; font-weight: 700; max-width: 100%; padding: 0.15rem 0.3rem; border: 2px solid var(--ink); border-radius: 8px; background: var(--floor); color: var(--ink); }
+.tag { font: 700 0.7rem/1 var(--body, inherit); padding: 0.15rem 0.45rem; border-radius: 999px; background: var(--paint); color: var(--paint-ink); text-transform: uppercase; letter-spacing: 0.05em; }
+.topline { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; margin-bottom: 0.4rem; }
+.action.ghost { background: none; }
+.action.ghost:hover { background: var(--ink); color: var(--floor); }
+select.multi { font: inherit; font-weight: 700; padding: 0.35rem 0.5rem; border: 2px solid var(--ink); border-radius: 999px; background: var(--floor); color: var(--ink); max-width: 60%; }
+.plist { gap: 0.25rem; }
+.prow { display: grid; gap: 0.2rem; }
+.pl { grid-template-columns: auto minmax(0, 1fr); gap: 0.1rem 0.5rem; padding: 0.4rem 0.55rem; }
+.pl.static { grid-template-columns: minmax(0, 1fr); cursor: default; }
+.pl .pn { grid-column: 2; overflow-wrap: anywhere; }
+.pl .pv { grid-column: 2; text-align: left; font-size: 0.92rem; }
+.pl .inj { grid-column: 2; justify-self: start; margin-left: 0; }
+.pl.static .pn, .pl.static .pv, .pl.static .inj { grid-column: 1; }
+.pl input { grid-row: 1 / span 3; align-self: start; margin-top: 0.15rem; }
+.prow.picked .pl { border-color: var(--paint); background: var(--tint); }
+.dest { display: flex; gap: 0.4rem; align-items: center; padding: 0 0.55rem 0.3rem 2.2rem; font-size: 0.85rem; color: var(--muted); }
+.dest select { font: inherit; font-weight: 700; min-width: 0; flex: 1; padding: 0.15rem 0.3rem; border: 2px solid var(--ink); border-radius: 8px; background: var(--floor); color: var(--ink); }
+.tbar { margin-top: 0.4rem; }
+@media (max-width: 720px) {
+  .split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.6rem; }
+  .pl .pv small { display: none; }
+  .cols.many { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(15rem, 82%); overflow-x: auto; scroll-snap-type: x proximity; padding-bottom: 0.4rem; }
+  .cols.many .tcol { scroll-snap-align: start; }
+}

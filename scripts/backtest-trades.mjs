@@ -112,3 +112,61 @@ for (const [lo, hi] of [[0, 5], [5, 10], [10, 20], [20, 40], [40, 80], [80, 1e9]
 }
 const ll = (s0) => -mean(decided.map((t) => { const p = Math.min(0.999, Math.max(0.001, normalCdf(Math.abs(gap(t)) / (s0 * Math.sqrt(t.size))))); return Math.log(gap(t) * truth(t) > 0 ? p : 1 - p); }));
 console.log(`   log-loss by sigma (STARS.sigma = ${STARS.sigma}; a coin flip scores 0.693):`, [40, 50, 60, 70, 80].map((s) => `${s}: ${ll(s).toFixed(3)}`).join('  '));
+
+/* 3. Multi-way trades (slower: add --multi) */
+if (process.argv.includes('--multi')) {
+  function multi(cutoff, seed, nTeams) {
+    const rand = rng(seed);
+    const days = allDays.filter((d) => d > cutoff);
+    const weeks = days.length / 7;
+    const known = pool.map((p) => {
+      const hist = [...p.rows].filter(([sp]) => sp <= cutoff).map(([, r]) => r);
+      const played = hist.filter((r) => r.played).map((r) => r.pts);
+      const o = { playerId: p.id, seasonGP: played.length, seasonAvg: mean(played), projAvg: p.proj, eligibleSlots: p.elig, src: p };
+      return { ...o, v: playerValue(o, hist.length), future: mean([...p.rows].filter(([sp]) => sp > cutoff).map(([, r]) => r.pts)) };
+    });
+    const out = [];
+    for (let L = 0; L < 2; L++) {
+      const order = [...known].sort((a, b) => b.projAvg * (0.85 + 0.3 * rand()) - a.projAvg * (0.85 + 0.3 * rand()));
+      const teams = Array.from({ length: 6 }, () => []);
+      for (let i = 0; i < 84; i++) teams[Math.floor(i / 6) % 2 ? 5 - (i % 6) : i % 6].push(order[i]);
+      const owned = new Set(teams.flat().map((p) => p.playerId));
+      const fa = known.filter((p) => !owned.has(p.playerId)).sort((a, b) => b.v.perGame - a.v.perGame);
+      const r = fa[STARS.replacementRank - 1].v.perGame;
+      const rReal = mean(fa.slice(STARS.replacementRank - 1, STARS.replacementRank + 9).map((p) => p.future));
+      const plays = (p, d) => p.src.rows.has(d);
+      const ctx = { days, slotIds: SLOTS, r, plays, item: (p) => ({ v: p.v.perGame, slots: p.eligibleSlots, outNow: false }) };
+      const real = (roster) => { let tot = 0; for (const d of days) { const t = roster.filter((p) => plays(p, d)); const picks = dayPicks(t.map((p) => ({ v: p.v.perGame, slots: p.eligibleSlots })), SLOTS, r); tot += picks.reduce((s, i) => s + t[i].src.rows.get(d).pts, 0) + (SLOTS.length - picks.length) * rReal; } return tot; };
+      const base = teams.map((t) => ({ pred: rosterValue(t, days, ctx), real: real(t) }));
+      const buckets = [[0, 10], [10, 25], [25, 50], [50, 90], [90, 150], [150, 1e9]], quota = buckets.map(() => 0);
+      for (let tries = 0; tries < 9000 && quota.some((q) => q < 14); tries++) {
+        const ids = [0, 1, 2, 3, 4, 5].sort(() => rand() - 0.5).slice(0, nTeams);
+        const moves = [];
+        for (const i of ids) for (const p of [...teams[i]].sort(() => rand() - 0.5).slice(0, 1 + Math.floor(rand() * 2))) { const others = ids.filter((j) => j !== i); moves.push({ p, from: i, to: others[Math.floor(rand() * others.length)] }); }
+        const after = (i) => [...teams[i].filter((p) => !moves.some((m) => m.from === i && m.p === p)), ...moves.filter((m) => m.to === i).map((m) => m.p)];
+        const pa = {}, ra = {};
+        for (const i of ids) { pa[i] = (rosterValue(after(i), days, ctx) - base[i].pred) / weeks; ra[i] = (real(after(i)) - base[i].real) / weeks; }
+        const hi = ids.reduce((a, b) => (pa[b] > pa[a] ? b : a)), lo = ids.reduce((a, b) => (pa[b] < pa[a] ? b : a));
+        const spread = pa[hi] - pa[lo];
+        const bk = buckets.findIndex(([x, y]) => spread >= x && spread < y);
+        if (bk < 0 || quota[bk] >= 14) continue;
+        quota[bk]++;
+        out.push({ spread, players: moves.length, hiReal: ra[hi], loReal: ra[lo] });
+      }
+    }
+    return out;
+  }
+  for (const nTeams of [3, 4]) {
+    const all = [];
+    for (const cutoff of [30, 70, 110]) for (const seed of [1, 2]) all.push(...multi(cutoff, seed, nTeams));
+    const dec = all.filter((t) => Math.abs(t.hiReal - t.loReal) > 1);
+    const ok = (t) => t.hiReal > t.loReal;
+    const loss = (s0) => -mean(dec.map((t) => { const p = Math.min(0.999, Math.max(0.001, normalCdf(t.spread / (s0 * Math.sqrt(t.players))))); return Math.log(ok(t) ? p : 1 - p); }));
+    console.log(`\n3. ${nTeams}-team trades (${all.length}): the predicted biggest winner really beats the predicted biggest loser ${(dec.filter(ok).length / dec.length * 100).toFixed(0)}% of the time`);
+    console.log(`   log-loss by sigma (using ${STARS.sigma}):`, [40, 50, 60, 70, 80, 100].map((s) => `${s}: ${loss(s).toFixed(3)}`).join('  '));
+    for (const [lo, hi] of [[0, 10], [10, 25], [25, 50], [50, 90], [90, 150], [150, 1e9]]) {
+      const b = dec.filter((t) => t.spread >= lo && t.spread < hi);
+      if (b.length > 5) console.log(`   spread ${String(lo).padStart(3)} to ${(hi > 1e8 ? 'more' : String(hi)).padEnd(5)}  ${String(b.length).padStart(4)} trades, right ${(b.filter(ok).length / b.length * 100).toFixed(0)}%, scale says ${(mean(b.map((t) => normalCdf(t.spread / (STARS.sigma * Math.sqrt(t.players))))) * 100).toFixed(0)}%`);
+    }
+  }
+}
