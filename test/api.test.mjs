@@ -156,9 +156,32 @@ for (const [mode, status, pattern] of [
   assert.match(asked[0], /scoreboard\?dates=20261028$/);
   for (const bad of ['', 'abc', '2026-10-28', '20261028;x']) assert.equal((await get(`/api/scoreboard?date=${encodeURIComponent(bad)}`)).res.status, 400, bad);
   globalThis.fetch = async () => new Response('x', { status: 503 });
-  const down = await get('/api/scoreboard?date=20261028');
+  const down = await get('/api/scoreboard?date=20261028&fresh=1');
   assert.equal(down.res.status, 502);
   assert.match(down.body.error, /HTTP 503/);
+  globalThis.fetch = real;
+}
+
+// Injuries: the 1 MB feed is trimmed to who, status and return date; the answer is cached and a failure is not
+{
+  const real = globalThis.fetch;
+  let calls = 0;
+  const entry = (id, status, returnDate, extra = {}) => ({ status, shortComment: 'x'.repeat(300), athlete: { links: [{ rel: ['playercard', 'desktop'], href: `https://www.espn.com/nba/player/_/id/${id}/some-player` }] }, details: { fantasyStatus: { abbreviation: 'OUT' }, type: 'Knee', detail: 'Surgery', returnDate }, ...extra });
+  globalThis.fetch = async () => {
+    calls++;
+    return new Response(JSON.stringify({ injuries: [{ id: '1', displayName: 'Team', injuries: [entry(4712863, 'Out', '2026-11-20'), entry(111, 'Day-To-Day', null), { status: 'Out', athlete: { links: [] }, details: {} }] }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const r = await get('/api/injuries?fresh=1');
+  assert.equal(r.res.status, 200);
+  assert.deepEqual(r.body.players.map((p) => [p.playerId, p.status, p.returnDate, p.type, p.detail]), [[4712863, 'Out', '2026-11-20', 'Knee', 'Surgery'], [111, 'Day-To-Day', null, 'Knee', 'Surgery']], 'player ids come from the player-card link; entries without one are dropped');
+  assert.ok(r.body.players[0].comment.length <= 180, 'comments are cut short');
+  await get('/api/injuries');
+  assert.equal(calls, 1, 'the second request is served from the cache');
+  globalThis.fetch = async () => new Response('x', { status: 500 });
+  const bad = await get('/api/injuries?fresh=1');
+  assert.equal(bad.res.status, 502);
+  assert.match(bad.body.error, /HTTP 500/);
+  assert.equal((await get('/api/injuries')).res.status, 200, 'a failure did not replace the good cached answer');
   globalThis.fetch = real;
 }
 

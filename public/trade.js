@@ -1,11 +1,13 @@
 // Trade analyser: what a trade is worth to each team over the rest of the season, and how fair it is.
-// Pure functions, no DOM. Method (and why) is in the README under "Trade stars".
+// Pure functions, no DOM. Method (and why) is in the README under "Trade tab and the star rating".
+import { spDay } from './logic.js';
 
 export const TRADE = {
   prior: 16, // games of weight given to ESPN's preseason projection (fitted on last season: best of 8-24)
   availPrior: 20, // games of weight given to the league-wide play rate when judging how often a player plays
   baseRate: 0.705, // share of team games a top-owned player actually plays over a season (measured, 311 players)
-  recover: 0.9, // how slowly a player who is out today drifts back to his usual play rate, per game
+  recover: 0.9, // how slowly a player who is out with no known return date drifts back to his usual play rate, per game
+  returnRecover: 0.5, // after a known return date he is back at his usual rate within a few games (an assumption: not testable yet)
 };
 
 /* ---------- One player ---------- */
@@ -23,8 +25,8 @@ export function playerValue(p, teamGames, { prior = TRADE.prior, availPrior = TR
 
 // Chance he plays his n-th game from now (n = 0 is the next one): a player who is out starts at 0 and
 // drifts back to his usual rate; a player who is not listed as out just plays at his usual rate.
-export function playChance(rate, outNow, n) {
-  return outNow ? rate * (1 - TRADE.recover ** (n + 1)) : rate;
+export function playChance(rate, outNow, n, recover = TRADE.recover) {
+  return outNow ? rate * (1 - recover ** (n + 1)) : rate;
 }
 
 /* ---------- One lineup ---------- */
@@ -98,15 +100,24 @@ export const dayPicks = (players, slotIds, r) => assign(surplus(players, slotIds
 
 // Expected points over `days` for a roster. `plays(p, day)` says whether his team has a game that day,
 // `item(p)` gives { v, slots, outNow } for him. Games count from now, so an injured player's value ramps up.
-export function rosterValue(roster, days, { slotIds, r, plays, item }) {
+export function rosterValue(roster, days, { slotIds, r, plays, item, dayMs }) {
   const items = roster.map((p) => ({ p, ...item(p), seen: 0 }));
   let total = 0;
   for (const day of days) {
     const today = [];
     for (const it of items) {
       if (!plays(it.p, day)) continue;
-      today.push({ v: it.v * (it.outNow ? playChance(1, true, it.seen) : 1), slots: it.slots });
-      it.seen += 1;
+      let v = it.v;
+      if (it.outUntil != null && dayMs) {
+        // ESPN gives a return date: nothing before it, then a short ramp back to his usual rate
+        if (dayMs(day) < it.outUntil) continue;
+        v *= playChance(1, true, it.seen, TRADE.returnRecover);
+        it.seen += 1;
+      } else if (it.outNow) {
+        v *= playChance(1, true, it.seen);
+        it.seen += 1;
+      }
+      today.push({ v, slots: it.slots });
     }
     total += dayValue(today, slotIds, r);
   }
@@ -177,14 +188,26 @@ export function teamGamesThrough(pro, proTeamId, sp) {
   return n;
 }
 
-// Everything the engine needs, from a parsed league. `freeAgents`: parsed free-agent players, best first
-// (any order is fine); without them the replacement level falls back to a typical value.
-export function tradeContext({ league, pro, freeAgents = [] }) {
+// Short date, UTC (the dates here are calendar days): "20 Nov".
+export const shortDate = (ms) => new Intl.DateTimeFormat('en-AU', { timeZone: 'UTC', day: 'numeric', month: 'short' }).format(ms);
+
+// Everything the engine needs, from a parsed league. `freeAgents`: parsed free-agent players (any order; without
+// them the replacement level falls back to a typical value). `injuries`: ESPN's injury report as a map by
+// player id (see injuryMap); players it lists get a known return date instead of a guessed recovery.
+export function tradeContext({ league, pro, freeAgents = [], injuries = new Map() }) {
   const cur = league.currentSP;
   const days = [...pro.spSlate.keys()].filter((sp) => sp > cur).sort((a, b) => a - b);
   const through = cur - 1; // games finished before today
+  const dayMs = (sp) => spDay(pro, sp);
+  const firstDay = days.length ? dayMs(days[0]) : 0;
   const valueOf = (p) => playerValue(p, teamGamesThrough(pro, p.proTeamId, through));
-  const healthy = freeAgents.filter((p) => !OUT_STATUSES.has(String(p.injury || '').toUpperCase())).map((p) => valueOf(p).perGame).sort((a, b) => b - a);
+  // Expected return date, if ESPN gives one that is still ahead
+  const returnOf = (p) => {
+    const ms = p.returnMs ?? injuries.get(p.playerId)?.returnMs ?? null;
+    return ms != null && ms > firstDay ? ms : null;
+  };
+  const isOut = (p) => OUT_STATUSES.has(String(p.injury || '').toUpperCase());
+  const healthy = freeAgents.filter((p) => returnOf(p) == null && !isOut(p)).map((p) => valueOf(p).perGame).sort((a, b) => b - a);
   const r = healthy.length >= STARS.replacementRank ? healthy[STARS.replacementRank - 1] : STARS.fallbackReplacement;
   return {
     days,
@@ -193,8 +216,18 @@ export function tradeContext({ league, pro, freeAgents = [] }) {
     replacementFromData: healthy.length >= STARS.replacementRank,
     rosterLimit: league.rosterLimit,
     valueOf,
+    dayMs,
+    returnOf,
+    guessOf: (p) => Boolean(p.returnGuess ?? injuries.get(p.playerId)?.guess),
     plays: (p, sp) => pro.games.get(p.proTeamId)?.has(sp),
-    item: (p) => ({ v: valueOf(p).perGame, slots: p.eligibleSlots?.length ? p.eligibleSlots : [11], outNow: OUT_STATUSES.has(String(p.injury || '').toUpperCase()) || p.slot === 13 }),
+    item: (p) => ({ v: valueOf(p).perGame, slots: p.eligibleSlots?.length ? p.eligibleSlots : [11], outNow: isOut(p) || p.slot === 13, outUntil: returnOf(p) }),
+    // games he will miss before the return date, for the notes
+    missed: (p) => {
+      const ms = returnOf(p);
+      return ms == null ? 0 : days.filter((d) => pro.games.get(p.proTeamId)?.has(d) && dayMs(d) < ms).length;
+    },
+    seasonEnd: days.length ? dayMs(days.at(-1)) : 0,
+    injuries,
   };
 }
 
@@ -210,7 +243,14 @@ export function evaluateTrade(ctx, teamA, teamB, giveIds, getIds) {
   const moving = [...teamA.roster.filter((p) => giveIds.includes(p.playerId)), ...teamB.roster.filter((p) => getIds.includes(p.playerId))];
   for (const p of moving) {
     const s = String(p.injury || 'ACTIVE').toUpperCase();
-    if (OUT_STATUSES.has(s)) notes.push(`${p.name} is out right now, so he adds nothing until he returns.`);
+    const ret = ctx.returnOf(p);
+    const what = [p.injuryType, p.injuryDetail].filter((x) => x && !/not specified|unknown/i.test(x)).join(' ').toLowerCase();
+    if (ret != null && ctx.seasonEnd && ret > ctx.seasonEnd) notes.push(`${p.name} is out for the rest of the season${what ? ` (${what})` : ''}.`);
+    else if (ret != null) {
+      const n = ctx.missed(p);
+      notes.push(`${p.name} is out until about ${shortDate(ret)}${what ? ` (${what})` : ''}${n > 0 ? `, so he misses about ${n} ${n === 1 ? 'game' : 'games'}` : ''}.${ctx.guessOf(p) ? ' ESPN has no firm timetable, so that date is a guess.' : ''}`);
+    }
+    else if (OUT_STATUSES.has(s)) notes.push(`${p.name} is out right now, so he adds nothing until he returns.`);
     else if (s !== 'ACTIVE') notes.push(`${p.name} is listed as ${s.replace(/_/g, ' ').toLowerCase()}.`);
   }
   return {

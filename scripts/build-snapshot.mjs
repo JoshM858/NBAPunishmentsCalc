@@ -43,11 +43,13 @@ try {
   const days = {};
   let leagueSlim = null;
   let proRaw = null;
+  let injuriesRaw = [];
   let cur = Infinity;
   let recording = true;
   const rec = {
     ...src,
     pro: async () => (proRaw = await src.pro()),
+    injuries: async () => (injuriesRaw = await src.injuries()),
     async league(views, opts = {}) {
       const { sp } = opts;
       if (!sp) {
@@ -90,6 +92,7 @@ try {
     league: leagueSlim,
     pro: slimPro(proRaw),
     freeAgents,
+    injuries: injuriesRaw,
     days,
     history,
   };

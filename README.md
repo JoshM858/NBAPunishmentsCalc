@@ -78,6 +78,8 @@ Things to know:
    - `HIDE_TEAMS` (text, optional): team IDs, abbreviations or names to leave off, comma-separated
 5. Open the `workers.dev` link. Press **Check against ESPN season totals** in the footer.
 
+**Check it in Cloudflare's real runtime before deploying**: `npm install`, then `npm run check:cloudflare`. It runs both the pasted bundle and the Wrangler setup in `workerd` (the engine Cloudflare uses) against live ESPN and checks every page and API route. It cannot enforce Cloudflare's free-plan CPU limit, so the slow routes (injuries, free agents, scoreboard) cache their trimmed answers to keep CPU use small.
+
 **With Wrangler (needs Node)**: set `LEAGUE_ID` in `wrangler.jsonc`, then `npm install`, `npx wrangler login`, `npx wrangler secret put ESPN_S2`, `npx wrangler secret put ESPN_SWID`, `npm run deploy`. For `npm run dev`, copy `.dev.vars.example` to `.dev.vars`.
 
 After editing anything in `public/` or `src/`, run `npm run build:dashboard` to regenerate `dist/worker-dashboard.js`.
@@ -106,6 +108,10 @@ How a trade is rated:
 4. **The stars** come from how often the predicted winner really wins at that gap: `confidence = normalCdf(gap / (60 * sqrt(players moved)))`, `stars = 5 - 4.5 * (2 * confidence - 1)` rounded to the nearest half. The more players move, the less a given gap tells you.
 
 Why this and not something simpler: `npm run backtest:trades` downloads last season's game logs and tests it. On 311 players, the shrunk estimate predicts a player's rest-of-season points per game with an error of about 8 points, against about 11 for the raw season average (and for the formula this app used before). On 3,024 simulated trades, adding up raw season averages picks the right winner 66% of the time; value over replacement picks it 72%. Adding the lineup positions did not beat the simple version on average, but it handles squeezes the simple version cannot (such as trading for a third centre you cannot start), so it is what the app uses. The star scale is calibrated on those trades: a gap under 10 points a week picks the winner barely better than a coin flip (about 55%), 20 to 40 points about 63%, 40 to 80 about 72%, and over 80 about 87%.
+
+Injuries use ESPN's injury report, which gives an expected return date for each hurt player. Before that date he adds nothing ; after it he ramps back over a few games. Short-term dates follow the next game's status, so they are fairly reliable; for long injuries they are ESPN's estimate, and when the write-up says there is no timetable the date is a placeholder, which the app flags as a guess. Without a date the older assumption applies (a player who is out drifts back over about 10 games). The return-date handling could not be backtested, because past injury reports are not published; the weekly odds and the trade rating share it.
+
+Check how the stars hold up on your own league's real trades with `npm run score-trades`. It reads executed trades from ESPN, rates each one using only what was known that day, and shows who has come out ahead since. Your league has had no trades yet, so it prints that; the trade format ESPN uses is assumed from its other transaction types and is unconfirmed until the first real one. A handful of trades says little about calibration, so the star scale itself still comes from the last-season simulation.
 
 Limits to know: injuries are the biggest unknown (a player's play rate misses by about 23 percentage points even when you know his history), so stars measure how sure we are, not a promise. The test used last season's data, and the free-agent list changes daily. Players you would receive who are currently out are flagged. Trades that need a team to drop players are flagged too.
 

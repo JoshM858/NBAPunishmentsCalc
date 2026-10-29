@@ -2,7 +2,7 @@
 // the snapshot builder, the check CLI and the tests all run the same code.
 // A source is { config(), league(views, { sp, fresh, past }), pro(), now(), history?(), offline? } (see sources.js).
 import {
-  parseLeague, parseProSchedule, parseWeekStart, buildWeeks, currentWeek, weekOf, dailyFromSchedule, scheduleCovers,
+  parseLeague, parseProSchedule, parseWeekStart, injuryMap, buildWeeks, currentWeek, weekOf, dailyFromSchedule, scheduleCovers,
   dayFromRoster, weeklyResults, checkTotals, finishedThrough,
 } from './logic.js';
 
@@ -45,8 +45,16 @@ export async function loadLeague(src, { forceRoster = false, fresh = false, cach
   const cfg = await src.config();
   if (!cfg.configured) return { cfg, unconfigured: true };
 
-  const [leagueRaw, proRaw] = await Promise.all([src.league(LIVE_VIEWS, { fresh }), src.pro()]);
+  // The injury report is a bonus: without it the model falls back to ESPN's status alone
+  const [leagueRaw, proRaw, injuryList] = await Promise.all([src.league(LIVE_VIEWS, { fresh }), src.pro(), src.injuries ? src.injuries().catch(() => []) : []]);
   const league = parseLeague(leagueRaw, cfg.season);
+  const injuries = injuryMap(injuryList);
+  for (const t of league.teams) {
+    for (const p of t.roster) {
+      const info = injuries.get(p.playerId);
+      if (info) Object.assign(p, { returnMs: info.returnMs, returnGuess: info.guess, injuryType: info.type, injuryDetail: info.detail });
+    }
+  }
   const hide = new Set((cfg.hideTeams || []).map((s) => String(s).toLowerCase()));
   if (hide.size) league.teams = league.teams.filter((t) => ![String(t.id), t.abbrev.toLowerCase(), t.name.toLowerCase()].some((k) => hide.has(k)));
   if (!league.teams.length) throw new Error('ESPN returned a league with no teams. Check LEAGUE_ID and SEASON.');
@@ -75,7 +83,7 @@ export async function loadLeague(src, { forceRoster = false, fresh = false, cach
     if (!daily.has(tid)) daily.set(tid, new Map());
     if (!daily.get(tid).has(cur)) daily.get(tid).set(cur, v.pts);
   }
-  return { cfg, league, pro, weeks, daily, dayDetail, source };
+  return { cfg, league, pro, weeks, daily, dayDetail, source, injuries };
 }
 
 // Fill in every finished day (roster method only) so Shame and the ESPN totals check have the whole season.

@@ -8,6 +8,7 @@ export function createApiSource(get) {
     config: () => get('api/config'),
     pro: () => get('api/pro-schedule'),
     freeAgents: () => get('api/free-agents').then((b) => b.players),
+    injuries: () => get('api/injuries').then((b) => b.players),
     league(views, { sp, fresh, past } = {}) {
       const q = new URLSearchParams();
       for (const v of views) q.append('view', v);
@@ -44,6 +45,7 @@ export function createSnapshotSource(snap) {
     config: async () => snap.config,
     pro: async () => snap.pro,
     freeAgents: async () => snap.freeAgents || [],
+    injuries: async () => snap.injuries || [],
     league: async (views, { sp } = {}) => {
       if (!sp) return snap.league;
       const day = snap.days?.[sp];

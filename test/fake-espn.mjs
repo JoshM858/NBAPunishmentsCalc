@@ -11,6 +11,11 @@ export function installFakeEspn({ mode = 'ok', withSchedule = false, leagueId = 
   const real = globalThis.fetch;
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
+    if (String(input).startsWith('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries')) {
+      // One injured demo player (id 1001), out until 20 Nov, with no firm timetable
+      const link = [{ rel: ['playercard', 'desktop'], href: 'https://www.espn.com/nba/player/_/id/1001/demo-player' }];
+      return new Response(JSON.stringify({ injuries: [{ id: '1', displayName: 'Demo Team', injuries: [{ status: 'Out', shortComment: 'Out without a timetable for a return.', athlete: { links: link }, details: { type: 'Knee', detail: 'Sprain', returnDate: '2026-11-20' } }] }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
     if (!String(input).startsWith(BASE)) return real(input, init);
     const cookie = init.headers?.Cookie || '';
     calls.push({ url: url.pathname + url.search, cookie });

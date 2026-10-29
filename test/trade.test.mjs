@@ -3,9 +3,11 @@ import { readFileSync } from 'node:fs';
 import { parseLeague, parseProSchedule } from '../public/logic.js';
 import {
   STARS, TRADE, assign, dayPicks, dayValue, evaluateTrade, maxMatching, normalCdf, playChance, playerValue, rosterValue,
-  starsFor, teamGamesThrough, tradeContext, tradeGains, verdict, winnerConfidence,
+  starsFor, teamGamesThrough, tradeContext, tradeGains, verdict, winnerConfidence, shortDate,
 } from '../public/trade.js';
+import { injuryMap } from '../public/logic.js';
 
+const OUT_STATUSES_TEST = new Set(['OUT', 'SUSPENSION', 'INJURY_RESERVE']);
 const fixture = (f) => JSON.parse(readFileSync(new URL(`./fixtures/${f}`, import.meta.url), 'utf8'));
 const near = (a, b, eps = 1e-6, msg) => assert.ok(Math.abs(a - b) <= eps, `${msg || ''} ${a} vs ${b}`);
 
@@ -204,6 +206,77 @@ const near = (a, b, eps = 1e-6, msg) => assert.ok(Math.abs(a - b) <= eps, `${msg
   const full = evaluateTrade({ ...withFa, rosterLimit: A.roster.length }, A, B, [byValue(A)[0].playerId], byValue(B).slice(0, 3).map((p) => p.playerId));
   assert.equal(full.a.mustDrop, 2, 'getting 3 for 1 with a full roster means dropping 2');
   assert.equal(full.b.mustDrop, 0);
+}
+
+/* ---------- Known return dates ---------- */
+
+{
+  const days = Array.from({ length: 20 }, (_, i) => i + 1);
+  const dayMs = (d) => Date.UTC(2026, 9, 29) + d * 86_400_000;
+  const mk = (id, extra = {}) => ({ playerId: id, v: 40, slots: [11], ...extra });
+  const base = { days, slotIds: [11], r: 5, plays: () => true, dayMs, item: (p) => ({ v: p.v, slots: p.slots, outNow: Boolean(p.out), outUntil: p.until ?? null }) };
+  const healthy = rosterValue([mk(1)], days, base);
+  const backDay11 = rosterValue([mk(1, { out: true, until: dayMs(11) })], days, base);
+  const backDay21 = rosterValue([mk(1, { out: true, until: dayMs(21) })], days, base);
+  const unknown = rosterValue([mk(1, { out: true })], days, base);
+  assert.ok(backDay21 < backDay11 && backDay11 < healthy, 'the later he returns, the less he is worth');
+  // 10 days out at 5 (free agent) then back, with a ramp: close to 10 days of replacement + ~10 days of him
+  near(backDay21, 20 * 5, 1e-9, 'out through the end of the window: only the free agent plays');
+  assert.ok(backDay11 > 10 * 5 + 8 * 40 && backDay11 < 10 * 5 + 10 * 40, `back on day 11: ${backDay11}`);
+  assert.ok(unknown > backDay21 && unknown < healthy, 'no date: assumed to drift back');
+  // first game back he is only partly there (returnRecover 0.5)
+  const justBack = rosterValue([mk(1, { out: true, until: dayMs(1) })], [1], base);
+  near(justBack, 40 * 0.5, 1e-9, 'half a player in his first game back (returnRecover 0.5)');
+
+  assert.equal(shortDate(Date.UTC(2026, 10, 20)), '20 Nov');
+}
+
+/* ---------- Real injury report ---------- */
+
+{
+  const real = fixture('real-league.json');
+  const pro = parseProSchedule(fixture('pro-2027.json'));
+  const league = parseLeague(real.league, 2027);
+  const injuries = injuryMap(real.injuries);
+  assert.ok(injuries.size > 20);
+  const withDates = tradeContext({ league, pro, freeAgents: real.freeAgents, injuries });
+  const without = tradeContext({ league, pro, freeAgents: real.freeAgents });
+  const everyone = league.teams.flatMap((t) => t.roster.map((p) => ({ team: t, player: p })));
+  // (the fixture's schedule ends mid-December, so "due back inside it" and "past its end" are both available)
+  const inside = everyone.find(({ player: p }) => withDates.returnOf(p) != null && withDates.returnOf(p) < withDates.seasonEnd && withDates.missed(p) >= 15);
+  assert.ok(inside, 'someone is out for 15+ games and due back before the schedule ends');
+  const { team, player } = inside;
+  // alone on a roster, a player out for weeks is worth less once the date is known than under the blind
+  // "drifts back within about 10 games" assumption; for a short injury the date is worth more than the blind guess
+  const alone = (ctx, p) => rosterValue([p], ctx.days, ctx);
+  assert.ok(alone(withDates, player) < alone(without, player), `${player.name}: dated ${alone(withDates, player).toFixed(0)} vs blind ${alone(without, player).toFixed(0)}`);
+  const shortOut = [...injuries].filter(([, i]) => i.returnMs && i.returnMs <= Date.UTC(2026, 10, 3)).map(([id]) => id);
+  const sp1 = everyone.map((x) => x.player).find((p) => shortOut.includes(p.playerId) && OUT_STATUSES_TEST.has(String(p.injury).toUpperCase()));
+  if (sp1) assert.ok(alone(withDates, sp1) > alone(without, sp1), `${sp1.name} due back within days is worth more with the date`);
+  assert.ok(withDates.missed(player) >= 15, `${player.name} misses ${withDates.missed(player)} games`);
+  const other = league.teams.find((t) => t !== team);
+  const asked = evaluateTrade(withDates, team, other, [player.playerId], [other.roster.find((p) => p.slot <= 11).playerId]);
+  assert.ok(asked.notes.some((n) => n.includes(player.name) && /out until about/.test(n)), asked.notes.join(' | '));
+  // out past the end of the schedule reads as season-ending
+  const seasonOut = [...injuries].find(([id, i]) => i.returnMs > withDates.seasonEnd && league.teams.some((t) => t.roster.some((p) => p.playerId === id)));
+  if (seasonOut) {
+    const owner = league.teams.find((t) => t.roster.some((p) => p.playerId === seasonOut[0]));
+    const sp = owner.roster.find((p) => p.playerId === seasonOut[0]);
+    const oth = league.teams.find((t) => t !== owner);
+    assert.ok(evaluateTrade(withDates, owner, oth, [sp.playerId], [oth.roster[0].playerId]).notes.some((n) => n.includes(sp.name) && /rest of the season/.test(n)));
+  }
+  // a placeholder date is called a guess
+  const guessId = real.injuries.find((i) => i.guess && league.teams.some((t) => t.roster.some((p) => p.playerId === i.playerId)))?.playerId;
+  if (guessId) {
+    const owner = league.teams.find((t) => t.roster.some((p) => p.playerId === guessId));
+    const gp = owner.roster.find((p) => p.playerId === guessId);
+    const oth = league.teams.find((t) => t !== owner);
+    const n = evaluateTrade(withDates, owner, oth, [guessId], [oth.roster[0].playerId]).notes.find((x) => x.includes(gp.name));
+    assert.ok(!n || /guess|rest of the season/.test(n), n);
+  }
+  // injured free agents (or ones due back later) cannot set the replacement level
+  const onlyHurt = tradeContext({ league, pro, freeAgents: real.freeAgents.filter((p) => injuries.get(p.playerId)?.returnMs > withDates.dayMs(withDates.days[0])), injuries });
+  assert.equal(onlyHurt.replacementFromData, false);
 }
 
 console.log('All trade tests passed');

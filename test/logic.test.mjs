@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createDemo } from '../public/demo.js';
 import {
-  parseLeague, parseProSchedule, parseEntry, buildWeeks, currentWeek, weekOf, dayLabel, spDay, parseWeekStart, isDayDone, projectTeam, simulateWeek, missChance, levelSd, MODEL, dayInfo, gameDays, localTime, zoneName, duration, etDateKey, validTimeZone, finishedThrough, dailyFromSchedule,
+  parseLeague, parseProSchedule, parseEntry, buildWeeks, currentWeek, weekOf, dayLabel, spDay, parseWeekStart, isDayDone, projectTeam, simulateWeek, missChance, levelSd, MODEL, injuryMap, dayInfo, gameDays, localTime, zoneName, duration, etDateKey, validTimeZone, finishedThrough, dailyFromSchedule,
   dayFromRoster, buildModel, checkTotals, slimLeague, slimPro,
 } from '../public/logic.js';
 import { LIVE_VIEWS, loadLeague, loadSeasonDays, neededDays, historyOf } from '../public/pipeline.js';
@@ -200,6 +200,43 @@ assert.equal(m.weeksSource, 'espn');
   assert.ok(season.check.every((c) => c.ok), 'totals check is green from a snapshot alone');
   assert.deepEqual(season.shame, full.shame);
   await assert.rejects(() => source.league(['mRoster'], { sp: 1 }), /doesn.t include day 1/);
+}
+
+/* ---------- Injury return dates in the weekly model ---------- */
+
+{
+  const inj = injuryMap([
+    { playerId: 1, status: 'Out', returnDate: '2026-11-20', type: 'Foot', detail: 'Fracture', guess: false, comment: 'c' },
+    { playerId: 2, status: 'Day-To-Day', returnDate: null },
+    { playerId: '3', status: 'Out', returnDate: '2027-07-01', guess: true },
+  ]);
+  assert.equal(inj.get(1).returnMs, Date.UTC(2026, 10, 20));
+  assert.equal(inj.get(2).returnMs, null);
+  assert.equal(inj.get(3).guess, true, 'string ids are accepted');
+  assert.equal(injuryMap(undefined).size, 0);
+
+  // Week with games on days 10-13 (day n is Oct 19 + n, UTC midnight)
+  const sps = [10, 11, 12, 13];
+  const proW = { games: new Map([[1, new Map(sps.map((sp) => [sp, { date: sp * 1e6, opp: 2 }]))]]), dayOffset: Math.round(Date.UTC(2026, 9, 19) / 86_400_000) };
+  const day = (sp) => Date.UTC(2026, 9, 19) + sp * 86_400_000;
+  const player = (extra) => ({ playerId: 1, proTeamId: 1, slot: 0, injury: 'OUT', seasonAvg: 40, seasonGP: 20, last15Avg: 40, projAvg: 40, ...extra });
+  const opts = { week: { sps }, currentSP: 10, pro: proW, now: 0, activeSlots: 10 };
+  const noDate = projectTeam({ roster: [player({})] }, opts);
+  const outAll = projectTeam({ roster: [player({ returnMs: day(14) })] }, opts); // back after the week ends
+  const backMid = projectTeam({ roster: [player({ returnMs: day(12) })] }, opts); // back for the last two days
+  assert.equal(outAll.mean, 0, 'out for the whole week means no points and no games left');
+  assert.equal(outAll.games, 0);
+  assert.ok(backMid.mean > 0 && backMid.mean < 2 * 40 * 1.0001, `back on day 12: ${backMid.mean}`);
+  assert.ok(backMid.games <= 2);
+  assert.ok(noDate.mean > outAll.mean, 'without a date there is still a chance he returns');
+  // simulation never scores him before the return date
+  const sim = simulateWeek([{ id: 'x', current: 0, mean: outAll.mean, plan: outAll.plan }, { id: 'y', current: 0, mean: backMid.mean, plan: backMid.plan }]);
+  assert.equal(sim.get('x').mean, 0);
+  assert.equal(sim.get('x').sd, 0);
+  assert.ok(sim.get('y').mean > 0 && sim.get('y').mean < 90);
+  // a return date already passed behaves like a player coming back, not like a long-term injury
+  const returned = projectTeam({ roster: [player({ returnMs: day(9) })] }, opts);
+  assert.ok(returned.mean > 3 * 40 * 0.5, `already due back: ${returned.mean}`);
 }
 
 /* ---------- The recap follows the last finished day, not ESPN's counter ---------- */

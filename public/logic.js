@@ -87,6 +87,17 @@ export function parseLeague(raw, fallbackSeason) {
   };
 }
 
+// ESPN's injury report as a map by player id: { status, returnMs (UTC midnight of the expected return date),
+// guess (ESPN gives no timetable, so the date is a placeholder), type, detail }.
+export function injuryMap(list) {
+  const out = new Map();
+  for (const i of list || []) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(i.returnDate || '');
+    out.set(Number(i.playerId), { status: i.status, returnMs: m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : null, guess: Boolean(i.guess), type: i.type || null, detail: i.detail || null, comment: i.comment || '' });
+  }
+  return out;
+}
+
 export function parseProSchedule(raw) {
   const games = new Map(); // proTeamId -> Map(sp -> game)
   const spDate = new Map(); // sp -> earliest tip-off (ms)
@@ -276,6 +287,11 @@ function etDayNumber(ms) {
   return Date.UTC(+p.year, +p.month - 1, +p.day) / DAY_MS;
 }
 
+// The scoring period for a moment in time (the US Eastern calendar day it falls on), or null if unknown.
+export function spOnDate(pro, ms) {
+  return pro.dayOffset == null ? null : etDayNumber(ms) - pro.dayOffset;
+}
+
 export function dayLabel(pro, sp) {
   const ms = spDay(pro, sp);
   return ms == null ? `Day ${sp}` : dayLabelFmt.format(ms).replace(',', '');
@@ -434,6 +450,7 @@ export const MODEL = {
   levelSd: 0.2, // uncertainty in a player's true average before any games (shrinks as games are played)
   levelFloor: 0.05, // role and usage can change, whatever the sample
   later: 0.97, // days not yet set: managers miss slots, positions don't line up
+  returnMiss: 0.4, // chance a player misses his first game back from an injury (an assumption: not testable yet)
   teamSd: 0.07, // how well a manager sets lineups all week (teams scored 85-96% of their best lineup)
 };
 
@@ -469,13 +486,24 @@ export function projectTeam(team, { week, currentSP, pro, now, activeSlots }) {
     if (p.slot === IR_SLOT) continue;
     const mu = expectedPerGame(p);
     if (mu <= 0) continue;
-    const persist = missChance(p.injury) >= 1 ? MODEL.outPersist : MODEL.persist;
-    let miss = missChance(p.injury);
+    const persist = missChance(p.injury) >= 1 && p.returnMs == null ? MODEL.outPersist : MODEL.persist;
+    // With an expected return date from ESPN's injury report: certainly out before it, shaky just after it.
+    // Without one, ESPN's status gives the chance and a miss tends to repeat.
+    const dated = p.returnMs != null;
+    let miss = dated ? MODEL.returnMiss : missChance(p.injury);
+    let anchored = true; // the chain starts here (first game, or the first game back)
     const games = [];
     for (const sp of days) {
       const g = pro.games.get(p.proTeamId)?.get(sp);
       if (!g || (sp === currentSP && g.date <= now)) continue; // no game, or already played (its points are in the total)
-      games.push({ sp, miss, picked: false, today: sp === currentSP && p.slot <= ACTIVE_MAX_SLOT });
+      if (dated && spDay(pro, sp) < p.returnMs) {
+        games.push({ sp, miss: 1, forced: true, picked: false, today: false });
+        miss = MODEL.returnMiss;
+        anchored = true;
+        continue;
+      }
+      games.push({ sp, miss, anchor: anchored, picked: false, today: sp === currentSP && p.slot <= ACTIVE_MAX_SLOT });
+      anchored = false;
       miss = miss * persist + (1 - miss) * MODEL.base;
     }
     if (games.length) cands.push({ p, mu, persist, games });
@@ -543,7 +571,11 @@ export function simulateWeek(rows, sims = 4000) {
         const level = Math.exp(pl.levelSd * gauss() - (pl.levelSd * pl.levelSd) / 2);
         let missed = false;
         for (const g of pl.games) {
-          missed = rand() < (g === pl.games[0] ? g.miss : missed ? pl.persist : MODEL.base);
+          if (g.forced) {
+            missed = true; // ESPN says he is still out
+            continue;
+          }
+          missed = rand() < (g.anchor ? g.miss : missed ? pl.persist : MODEL.base);
           if (!missed && g.picked) rest += pl.mu * level * g.w * Math.exp(sigma * gauss() - sigma2 / 2);
         }
       }

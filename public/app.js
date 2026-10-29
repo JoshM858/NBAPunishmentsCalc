@@ -1,6 +1,6 @@
 import { buildModel, dayInfo, dayLabel, duration, etDateKey, gameDays, localTime, validTimeZone, zoneName } from './logic.js';
 import { loadLeague, loadSeasonDays } from './pipeline.js';
-import { evaluateTrade, tradeContext } from './trade.js';
+import { evaluateTrade, shortDate, tradeContext } from './trade.js';
 import { createApiSource, createSnapshotSource, checkSnapshot, fetchScoreboard } from './sources.js';
 
 const HOUR = 3_600_000;
@@ -473,7 +473,7 @@ async function ensureFreeAgents() {
   renderTrade();
 }
 
-const tradeCtx = () => (state.tradeCtx ||= tradeContext({ league: state.ctx.league, pro: state.ctx.pro, freeAgents: state.fa || [] }));
+const tradeCtx = () => (state.tradeCtx ||= tradeContext({ league: state.ctx.league, pro: state.ctx.pro, freeAgents: state.fa || [], injuries: state.ctx.injuries }));
 
 function rosterList(team, kind, picked, ctx) {
   const groups = [['Starting', (p) => p.slot <= 11], ['Bench', (p) => p.slot === 12], ['Injured reserve', (p) => p.slot >= 13]];
@@ -484,7 +484,9 @@ function rosterList(team, kind, picked, ctx) {
       const items = rows
         .map((p) => {
           const v = ctx.valueOf(p);
-          const inj = p.injury && p.injury !== 'ACTIVE' ? `<span class="inj">${esc(p.injury.replace(/_/g, ' ').toLowerCase())}</span>` : '';
+          const back = ctx.returnOf(p);
+          const status = p.injury && p.injury !== 'ACTIVE' ? p.injury.replace(/_/g, ' ').toLowerCase() : back ? 'hurt' : '';
+          const inj = status ? `<span class="inj">${esc(status)}${back ? `, back ~${shortDate(back)}` : ''}</span>` : '';
           return `<li><label class="pl${picked.has(p.playerId) ? ' picked' : ''}">
               <input type="checkbox" data-trade="${kind}" data-id="${p.playerId}"${picked.has(p.playerId) ? ' checked' : ''}>
               <span class="pn">${esc(p.name)}${inj}</span>

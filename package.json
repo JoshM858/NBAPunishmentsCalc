@@ -12,7 +12,9 @@
     "capture": "node scripts/capture-fixture.mjs",
     "backtest": "node scripts/backtest.mjs",
     "backtest:trades": "node scripts/backtest-trades.mjs",
-    "test": "node test/logic.test.mjs && node test/real.test.mjs && node test/api.test.mjs && node test/snapshot.test.mjs && node test/dashboard.test.mjs && node test/trade.test.mjs",
+    "score-trades": "node scripts/score-trades.mjs",
+    "check:cloudflare": "node scripts/check-cloudflare.mjs",
+    "test": "node test/logic.test.mjs && node test/real.test.mjs && node test/api.test.mjs && node test/snapshot.test.mjs && node test/dashboard.test.mjs && node test/trade.test.mjs && node test/scorecard.test.mjs",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "build:dashboard": "node scripts/build-dashboard.mjs"

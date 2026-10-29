@@ -4,11 +4,12 @@
 // Cloudflare plan's 10 ms CPU limit.
 
 const ESPN = 'https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons';
-const VIEWS = new Set(['mSettings', 'mTeam', 'mRoster', 'mMatchup', 'mMatchupScore', 'mStatus', 'mScoreboard', 'mStandings']);
+const VIEWS = new Set(['mSettings', 'mTeam', 'mRoster', 'mMatchup', 'mMatchupScore', 'mStatus', 'mScoreboard', 'mStandings', 'mTransactions2']);
 const LIVE_TTL = 90;
 const PAST_TTL = 12 * 3600;
 const SCHEDULE_TTL = 6 * 3600;
 const SCOREBOARD = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard';
+const INJURIES = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries';
 
 // Stand-in for the Workers Cache API when running under Node.
 const memory = new Map();
@@ -69,11 +70,31 @@ export async function handleApi(request, env, ctx) {
     if (url.pathname === '/api/scoreboard') {
       const date = url.searchParams.get('date') || '';
       if (!/^\d{8}$/.test(date)) return json({ error: 'date must look like 20261028.' }, 400);
-      const res = await fetch(`${SCOREBOARD}?dates=${date}`, { headers: { Accept: 'application/json' } });
-      if (!res.ok) return json({ error: `ESPN’s scoreboard returned HTTP ${res.status}.` }, 502);
-      const body = await res.json();
-      const events = (body.events || []).map((e) => ({ id: e.id, date: e.date, status: { type: { state: e.status?.type?.state, detail: e.status?.type?.detail } } }));
-      return new Response(JSON.stringify({ events }), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=30' } });
+      return trimmed(`scoreboard-${date}`, 30, ctx, url.searchParams.get('fresh') === '1', async () => {
+        const res = await fetch(`${SCOREBOARD}?dates=${date}`, { headers: { Accept: 'application/json' } });
+        if (!res.ok) return json({ error: `ESPN’s scoreboard returned HTTP ${res.status}.` }, 502);
+        const body = await res.json();
+        return { events: (body.events || []).map((e) => ({ id: e.id, date: e.date, status: { type: { state: e.status?.type?.state, detail: e.status?.type?.detail } } })) };
+      });
+    }
+
+    // Who is hurt and when ESPN expects them back. Trimmed to what the page reads (the raw feed is about 1 MB).
+    if (url.pathname === '/api/injuries') {
+      return trimmed('injuries', 1800, ctx, url.searchParams.get('fresh') === '1', async () => {
+        const res = await fetch(INJURIES, { headers: { Accept: 'application/json' } });
+        if (!res.ok) return json({ error: `ESPN’s injury report returned HTTP ${res.status}.` }, 502);
+        const players = [];
+        for (const team of (await res.json()).injuries || []) {
+          for (const i of team.injuries || []) {
+            const playerId = Number(/\/id\/(\d+)/.exec(i.athlete?.links?.find((l) => l.rel?.includes('playercard'))?.href || '')?.[1]);
+            if (!playerId) continue;
+            // No timetable in the write-up means the date is ESPN's placeholder, not a real estimate
+            const guess = /timetable|indefinite/i.test(`${i.shortComment || ''} ${i.longComment || ''}`);
+            players.push({ playerId, status: i.status, returnDate: i.details?.returnDate || null, guess, type: i.details?.type || null, detail: i.details?.detail || null, comment: String(i.shortComment || '').slice(0, 180) });
+          }
+        }
+        return { players };
+      });
     }
 
     // Best players nobody owns, for working out what a replacement is worth. Trimmed to what the page reads.
@@ -88,20 +109,23 @@ export async function handleApi(request, env, ctx) {
         },
       };
       const target = `${ESPN}/${season}/segments/0/leagues/${leagueId}?view=kona_player_info`;
-      const res = await proxy(target, { cookie, ctx, ttl: 600, fresh: url.searchParams.get('fresh') === '1', what: 'league', season, leagueId, headers: { 'x-fantasy-filter': JSON.stringify(filter) }, variant: '#fa' });
-      if (!res.ok) return res;
-      const stat = (p, id) => p.stats?.find((s) => s.id === id);
-      const players = ((await res.json()).players || []).map((e) => ({
-        playerId: e.player.id,
-        name: e.player.fullName,
-        proTeamId: e.player.proTeamId,
-        injury: e.player.injuryStatus || 'ACTIVE',
-        seasonGP: stat(e.player, `00${season}`)?.stats?.['42'] ?? 0,
-        seasonAvg: stat(e.player, `00${season}`)?.appliedAverage ?? 0,
-        projAvg: stat(e.player, `10${season}`)?.appliedAverage ?? 0,
-        eligibleSlots: e.player.eligibleSlots || [],
-      }));
-      return new Response(JSON.stringify({ players }), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=300' } });
+      return trimmed('free-agents', 600, ctx, url.searchParams.get('fresh') === '1', async () => {
+        const res = await proxy(target, { cookie, ctx, ttl: 1, fresh: true, what: 'league', season, leagueId, headers: { 'x-fantasy-filter': JSON.stringify(filter) }, variant: '#fa' });
+        if (!res.ok) return res;
+        const stat = (p, id) => p.stats?.find((s) => s.id === id);
+        return {
+          players: ((await res.json()).players || []).map((e) => ({
+            playerId: e.player.id,
+            name: e.player.fullName,
+            proTeamId: e.player.proTeamId,
+            injury: e.player.injuryStatus || 'ACTIVE',
+            seasonGP: stat(e.player, `00${season}`)?.stats?.['42'] ?? 0,
+            seasonAvg: stat(e.player, `00${season}`)?.appliedAverage ?? 0,
+            projAvg: stat(e.player, `10${season}`)?.appliedAverage ?? 0,
+            eligibleSlots: e.player.eligibleSlots || [],
+          })),
+        };
+      });
     }
 
     if (url.pathname === '/api/league') {
@@ -127,6 +151,23 @@ export async function handleApi(request, env, ctx) {
   } catch (err) {
     return json({ error: `Couldn’t reach ESPN: ${err.message}` }, 502);
   }
+}
+
+// Cache the trimmed answer, not ESPN's big one: parsing a megabyte of JSON on every request would eat the
+// Cloudflare free plan's 10 ms of CPU, but it costs nothing when the cached answer is served as it is.
+// `make` returns the object to send, or a Response (an error) which is passed through uncached.
+async function trimmed(name, ttl, ctx, fresh, make) {
+  const cache = globalThis.caches?.default ?? memoryCache;
+  const key = new Request(`https://espn-cache.invalid/trimmed/${name}`);
+  if (!fresh) {
+    const hit = await cache.match(key).catch(() => null);
+    if (hit) return hit;
+  }
+  const made = await make();
+  if (made instanceof Response) return made;
+  const out = new Response(JSON.stringify(made), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': `public, max-age=${ttl}` } });
+  ctx.waitUntil(cache.put(key, out.clone()).catch(() => {}));
+  return out;
 }
 
 async function proxy(target, { cookie = '', ctx, ttl, fresh, what, season, leagueId, headers: extra = {}, variant = '' }) {
