@@ -41,7 +41,7 @@ fake.restore();
 {
   fake = installFakeEspn();
   const { body } = await get('/api/config', { ...COOKIES, HIDE_TEAMS: 'Bench Mob, 3' });
-  assert.deepEqual(body, { configured: true, hasCookies: true, leagueId: '424242', season: 2027, platform: 'cloudflare', weekStart: null, timezone: null, hideTeams: ['Bench Mob', '3'] });
+  assert.deepEqual(body, { configured: true, hasCookies: true, leagueId: '424242', season: 2027, platform: 'cloudflare', weekStart: null, timezone: null, pins: false, hideTeams: ['Bench Mob', '3'] });
   assert.ok(!JSON.stringify(body).includes('AEBxyz123'));
   assert.equal((await get('/api/config', { LEAGUE_ID: '' })).body.configured, false);
   assert.equal((await get('/api/config', { ...COOKIES, ESPN_SWID: '' })).body.hasCookies, false, 'needs both cookies');
@@ -205,6 +205,75 @@ for (const [mode, status, pattern] of [
   assert.equal(missing.res.status, 404);
   assert.match(missing.body.error, /league 555/);
   globalThis.fetch = real;
+}
+
+// Team PINs
+{
+  const env = { LEAGUE_ID: '424242', TEAM_PINS: '1=482913, 2=193846, 4=777777', SESSION_SECRET: 'a-long-random-secret' };
+  const call = (path, init, e = env, base = 'http://site.test') => handleApi(new Request(base + path, init), e, ctx);
+  const post = (path, body, e = env, base) => call(path, { method: 'POST', body: JSON.stringify(body) }, e, base);
+  const cookieOf = (res) => res.headers.get('set-cookie').split(';')[0];
+  const me = async (cookie, e = env) => (await (await call('/api/me', { headers: cookie ? { cookie } : {} }, e)).json()).teamId;
+
+  // Off by default: the picker works exactly as before
+  assert.equal((await (await call('/api/me', {}, { LEAGUE_ID: '1' })).json()).pins, false);
+  assert.equal((await post('/api/login', { teamId: 1, pin: '1' }, { LEAGUE_ID: '1' })).status, 400);
+  assert.equal((await get('/api/config', { TEAM_PINS: '1=482913' })).body.pins, true);
+  assert.equal((await get('/api/config', {})).body.pins, false);
+  const cfg = JSON.stringify((await get('/api/config', env)).body);
+  assert.ok(!/482913|193846|777777|a-long-random-secret/.test(cfg), 'config never shows PINs or the secret');
+
+  // Wrong PIN, then the right one
+  let r = await post('/api/login', { teamId: 1, pin: '000000' });
+  assert.equal(r.status, 401);
+  assert.match((await r.json()).error, /isn’t right/);
+  assert.equal(r.headers.get('set-cookie'), null, 'no cookie for a wrong PIN');
+  r = await post('/api/login', { teamId: 1, pin: ' 482913 ' });
+  assert.equal(r.status, 200);
+  const cookie = cookieOf(r);
+  const flags = r.headers.get('set-cookie');
+  assert.match(flags, /HttpOnly/);
+  assert.match(flags, /SameSite=Lax/);
+  assert.ok(!/Secure/.test(flags), 'plain http (local) cannot use Secure cookies');
+  assert.match((await post('/api/login', { teamId: 1, pin: '482913' }, env, 'https://site.test')).headers.get('set-cookie'), /; Secure/, 'Secure over https');
+  assert.ok(!flags.includes('482913'), 'the PIN is not in the cookie');
+  assert.equal(await me(cookie), 1);
+  assert.equal(await me(null), null);
+
+  // Forgery and tampering
+  const [team, exp, sig] = cookie.replace('pw_team=', '').split('.');
+  assert.equal(await me(`pw_team=2.${exp}.${sig}`), null, 'cannot change the team in a signed cookie');
+  assert.equal(await me(`pw_team=${team}.${Number(exp) + 99999}.${sig}`), null, 'cannot extend it');
+  assert.equal(await me(`pw_team=${team}.${exp}.${'0'.repeat(sig.length)}`), null, 'cannot guess the signature');
+  assert.equal(await me(`pw_team=${team}.${exp}`), null);
+  assert.equal(await me('pw_team=garbage'), null);
+  assert.equal(await me(cookie, { ...env, SESSION_SECRET: 'other-secret' }), null, 'rotating the secret signs everyone out');
+  assert.equal(await me(cookie, { ...env, TEAM_PINS: '2=193846' }), null, 'removing a team’s PIN signs that team out');
+  // expired: sign one by hand with the same key via a short session (exp in the past)
+  const past = Math.floor(Date.now() / 1000) - 10;
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(`pw|${env.SESSION_SECRET}`), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const old = [...new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`1.${past}`)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  assert.equal(await me(`pw_team=1.${past}.${old}`), null, 'an expired session is refused even with a valid signature');
+
+  // Teams without a PIN, bad input
+  r = await post('/api/login', { teamId: 3, pin: '1234' });
+  assert.equal(r.status, 403);
+  assert.match((await r.json()).error, /doesn’t have a PIN/);
+  assert.equal((await post('/api/login', { teamId: 'x', pin: '1' })).status, 403);
+  assert.equal((await call('/api/login', { method: 'POST', body: 'not json' })).status, 403);
+  assert.equal((await call('/api/login')).status, 405, 'sign-in is POST only');
+  assert.equal((await call('/api/me', { method: 'POST' })).status, 405, 'other routes stay GET only');
+
+  // Lockout after five wrong PINs, even for the right one afterwards
+  for (let i = 0; i < 5; i++) assert.equal((await post('/api/login', { teamId: 4, pin: `00000${i}` })).status, 401);
+  r = await post('/api/login', { teamId: 4, pin: '777777' });
+  assert.equal(r.status, 429);
+  assert.match((await r.json()).error, /Wait ten minutes/);
+  assert.equal((await post('/api/login', { teamId: 2, pin: '193846' })).status, 200, 'other teams are unaffected');
+
+  // Sign out clears the cookie
+  r = await post('/api/logout', {});
+  assert.match(r.headers.get('set-cookie'), /Max-Age=0/);
 }
 
 // .env parsing

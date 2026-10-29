@@ -98,7 +98,15 @@ After editing anything in `public/` or `src/`, run `npm run build:dashboard` to 
 
 Pick your team (it is remembered on that device), tick the players you would give and the players you would get, and the bar at the top rates the trade from 0.5 to 5 stars in half-star steps. **5 stars means too close to call; fewer stars mean one side clearly comes out ahead**, and it names who and by how many points a week. It only judges a trade. Make the real one in ESPN.
 
-"Sign in" is a team picker, not a password. Everything on the site is already visible to the whole league, and GitHub Pages cannot check a password anyway, so there is nothing to protect.
+**Signing in.** By default "sign in" is just a team picker that remembers your team on that device. Everything on the site is already visible to the whole league, so there is nothing private to protect. If you want each team to need a PIN (Cloudflare or the PC version; GitHub Pages cannot check one):
+
+1. Run `npm run pins`. It prints a random 6-digit PIN for each team and a `TEAM_PINS` line (like `1=482913,2=193846`). Nothing is saved, so copy it from the screen.
+2. In Cloudflare, Settings, Variables and Secrets, add `TEAM_PINS` as a **secret** with that line (or put it in `.env` on a PC). Optionally add a secret `SESSION_SECRET` with any long random text.
+3. Give each manager their PIN. Picking a team now asks for it. A correct PIN keeps that manager signed in on that device for 90 days.
+
+Keep the PINs out of the code and out of GitHub: this repository's files are public to anyone who can see the repo. Changing `TEAM_PINS` or `SESSION_SECRET` signs everyone out. Be honest about what this is: a speed bump among friends, not bank security. After 5 wrong PINs a team is locked for ten minutes, but Cloudflare runs many copies of the Worker that do not share memory, so that limit is best-effort; 6 digits keeps guessing slow anyway. The PIN only controls who can use the signed-in Trade view as a team, since the league's scores and rosters stay public.
+
+**Sending the trade.** Tick the players, then press **Copy trade summary** for a message to paste into the group chat. The app does not send trades into ESPN: ESPN has no official way to do that, and it would need each manager's own ESPN login. A link opens your league in ESPN.
 
 How a trade is rated:
 

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { parseLeague, parseProSchedule } from '../public/logic.js';
 import {
   STARS, TRADE, assign, dayPicks, dayValue, evaluateTrade, maxMatching, normalCdf, playChance, playerValue, rosterValue,
-  starsFor, teamGamesThrough, tradeContext, tradeGains, verdict, winnerConfidence, shortDate,
+  starsFor, teamGamesThrough, tradeContext, tradeGains, tradeSummary, verdict, winnerConfidence, shortDate,
 } from '../public/trade.js';
 import { injuryMap } from '../public/logic.js';
 
@@ -277,6 +277,19 @@ const near = (a, b, eps = 1e-6, msg) => assert.ok(Math.abs(a - b) <= eps, `${msg
   // injured free agents (or ones due back later) cannot set the replacement level
   const onlyHurt = tradeContext({ league, pro, freeAgents: real.freeAgents.filter((p) => injuries.get(p.playerId)?.returnMs > withDates.dayMs(withDates.days[0])), injuries });
   assert.equal(onlyHurt.replacementFromData, false);
+}
+
+/* ---------- The message you can paste into the group chat ---------- */
+
+{
+  const result = { stars: 3.5, label: 'Lopsided', winner: 'b', a: { gain: -12.34 }, b: { gain: 12.6 } };
+  const text = tradeSummary(result, { a: 'Hang Low', b: 'Drake Fan Club', give: ['Wembanyama', 'Curry'], get: ['Cunningham'] });
+  assert.equal(text.split('\n')[1], 'Hang Low gives: Wembanyama, Curry');
+  assert.equal(text.split('\n')[2], 'Drake Fan Club gives: Cunningham');
+  assert.match(text, /Rating: 3\.5 out of 5 stars, lopsided\. Edge to Drake Fan Club\./);
+  assert.match(text, /Hang Low −12\.3 points a week, Drake Fan Club \+12\.6 points a week/);
+  assert.match(tradeSummary({ ...result, winner: null }, { a: 'A', b: 'B', give: ['x'], get: ['y'] }), /Dead even\./);
+  assert.match(tradeSummary({ ...result, winner: 'a' }, { a: 'A', b: 'B', give: ['x'], get: ['y'] }), /Edge to A\./);
 }
 
 console.log('All trade tests passed');

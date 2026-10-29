@@ -20,5 +20,6 @@
     // Time zone for game start and finish times (Victoria = Australia/Melbourne)
     "TIMEZONE": "Australia/Melbourne"
   }
+  // Secrets: also TEAM_PINS (and optionally SESSION_SECRET) if you want a PIN per team, from `npm run pins`.
   // Secrets (never put these here, optional if the league is public): npx wrangler secret put ESPN_S2 / ESPN_SWID
 }

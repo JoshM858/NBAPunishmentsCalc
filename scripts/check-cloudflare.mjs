@@ -21,7 +21,8 @@ const bundle = `${root}.cache/worker-check.js`;
 const built = spawnSync(process.execPath, [`${root}scripts/build-dashboard.mjs`, bundle], { encoding: 'utf8' });
 if (built.status !== 0) throw new Error(built.stderr);
 
-const vars = { LEAGUE_ID: env.LEAGUE_ID, SEASON: env.SEASON || '2027', HIDE_TEAMS: env.HIDE_TEAMS || '', ...(env.ESPN_S2 && env.ESPN_SWID ? { ESPN_S2: env.ESPN_S2, ESPN_SWID: env.ESPN_SWID } : {}) };
+// Made-up PINs for the check only: your real ones are never used here
+const vars = { LEAGUE_ID: env.LEAGUE_ID, SEASON: env.SEASON || '2027', HIDE_TEAMS: env.HIDE_TEAMS || '', TEAM_PINS: '1=482913', SESSION_SECRET: 'check-only-secret', ...(env.ESPN_S2 && env.ESPN_SWID ? { ESPN_S2: env.ESPN_S2, ESPN_SWID: env.ESPN_SWID } : {}) };
 const varFlags = Object.entries(vars).filter(([, v]) => v).flatMap(([k, v]) => ['--var', `${k}:${v}`]);
 let failures = 0;
 const check = (ok, what) => {
@@ -70,6 +71,17 @@ async function run(label, port, configArgs) {
     check(Array.isArray(sb.events), 'scoreboard');
     check((await get('/api/scoreboard?date=oops')).res.status === 400, 'rejects a bad scoreboard date');
     check((await get('/api/nope')).res.status === 404, 'unknown API route is a 404');
+
+    // Team PINs, which use Web Crypto for the signed cookie
+    const login = (body) => fetch(`http://127.0.0.1:${port}/api/login`, { method: 'POST', body: JSON.stringify(body) });
+    check(cfg.pins === true && !JSON.stringify(cfg).includes('482913'), 'PINs are on and never shown');
+    check((await login({ teamId: 1, pin: '000000' })).status === 401, 'a wrong PIN is refused');
+    const ok = await login({ teamId: 1, pin: '482913' });
+    const setCookie = ok.headers.get('set-cookie') || '';
+    check(ok.status === 200 && /pw_team=1\./.test(setCookie) && /HttpOnly/.test(setCookie), 'the right PIN signs in with a HttpOnly cookie');
+    const meWith = async (cookie) => (await (await fetch(`http://127.0.0.1:${port}/api/me`, { headers: { cookie } })).json()).teamId;
+    check((await meWith(setCookie.split(';')[0])) === 1, 'the cookie identifies the team');
+    check((await meWith(setCookie.split(';')[0].replace('pw_team=1.', 'pw_team=2.'))) === null, 'a tampered cookie is refused');
     check((await fetch(`http://127.0.0.1:${port}/api/config`, { method: 'POST' })).status === 405, 'POST is refused');
   } finally {
     child.kill('SIGTERM');

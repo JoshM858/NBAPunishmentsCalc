@@ -43,7 +43,8 @@ function defaultSeason(now = new Date()) {
 
 export async function handleApi(request, env, ctx) {
   const url = new URL(request.url);
-  if (request.method !== 'GET') return json({ error: 'Only GET is supported.' }, 405);
+  const signIn = url.pathname === '/api/login' || url.pathname === '/api/logout';
+  if (request.method !== (signIn ? 'POST' : 'GET')) return json({ error: signIn ? 'Use POST to sign in.' : 'Only GET is supported.' }, 405);
   const season = Number(env.SEASON) || defaultSeason();
   const leagueId = String(env.LEAGUE_ID || '').trim();
   const cookie = cookieHeader(env);
@@ -58,9 +59,15 @@ export async function handleApi(request, env, ctx) {
         platform: env.PLATFORM || 'cloudflare',
         weekStart: env.WEEK_START || null,
         timezone: env.TIMEZONE || null,
+        pins: pinsOf(env).size > 0, // whether team PINs are switched on; the PINs themselves never leave the server
         hideTeams: String(env.HIDE_TEAMS || '').split(',').map((s) => s.trim()).filter(Boolean),
       });
     }
+
+    // Team PINs: optional, and only a speed bump among friends (see README). Set TEAM_PINS="1=482913,2=193846".
+    if (url.pathname === '/api/me') return json({ pins: pinsOf(env).size > 0, teamId: await teamFromCookie(request, env) });
+    if (url.pathname === '/api/logout') return json({ teamId: null }, 200, { 'set-cookie': sessionCookie('', 0, url) });
+    if (url.pathname === '/api/login') return await login(request, env, url);
 
     if (url.pathname === '/api/pro-schedule') {
       return await proxy(`${ESPN}/${season}?view=proTeamSchedules_wl`, { ctx, ttl: SCHEDULE_TTL, fresh: false, what: 'schedule', season });
@@ -216,9 +223,68 @@ function explain(res, { cookie, what, season, leagueId, type }) {
   return { status: 502, error: `ESPN returned an unexpected response (HTTP ${s}).` };
 }
 
-function json(body, status = 200) {
+function json(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers },
   });
+}
+
+/* ---------- Team PINs ---------- */
+
+const SESSION_DAYS = 90;
+const COOKIE = 'pw_team';
+const attempts = new Map(); // teamId -> recent failures (per server instance, so a best-effort limit only)
+
+// TEAM_PINS="1=482913, 2=193846"  ->  Map(1 -> '482913', 2 -> '193846')
+function pinsOf(env) {
+  const out = new Map();
+  for (const part of String(env.TEAM_PINS || '').split(',')) {
+    const m = /^\s*(\d+)\s*=\s*(\S+)\s*$/.exec(part);
+    if (m) out.set(Number(m[1]), m[2]);
+  }
+  return out;
+}
+
+const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+async function hmac(env, text) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(`pw|${env.SESSION_SECRET || env.TEAM_PINS}`), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return hex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(text)));
+}
+
+// Compare without stopping at the first difference
+function sameText(a, b) {
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  return diff === 0;
+}
+
+const sessionCookie = (value, seconds, url) => `${COOKIE}=${value}; Path=/; Max-Age=${seconds}; HttpOnly; SameSite=Lax${url.protocol === 'https:' ? '; Secure' : ''}`;
+
+// The team named by a valid, unexpired session cookie (and only while that team still has a PIN), else null.
+async function teamFromCookie(request, env) {
+  if (!pinsOf(env).size) return null;
+  const raw = /(?:^|;\s*)pw_team=([^;]+)/.exec(request.headers.get('cookie') || '')?.[1];
+  const [teamId, expires, sig] = String(raw || '').split('.');
+  if (!sig || Number(expires) * 1000 < Date.now() || !pinsOf(env).has(Number(teamId))) return null;
+  return sameText(sig, await hmac(env, `${teamId}.${expires}`)) ? Number(teamId) : null;
+}
+
+async function login(request, env, url) {
+  const pins = pinsOf(env);
+  if (!pins.size) return json({ error: 'Team PINs are not switched on for this site.' }, 400);
+  const body = await request.json().catch(() => null);
+  const teamId = Number(body?.teamId);
+  const pin = String(body?.pin ?? '').trim();
+  const recent = (attempts.get(teamId) || []).filter((t) => Date.now() - t < 10 * 60_000);
+  if (recent.length >= 5) return json({ error: 'Too many wrong PINs for that team. Wait ten minutes and try again.' }, 429);
+  if (!pins.has(teamId)) return json({ error: 'That team doesn’t have a PIN yet. Ask the league organiser to add one.' }, 403);
+  if (!sameText(pin, pins.get(teamId))) {
+    attempts.set(teamId, [...recent, Date.now()]);
+    await new Promise((r) => setTimeout(r, 400)); // slows down guessing
+    return json({ error: 'That PIN isn’t right for that team.' }, 401);
+  }
+  attempts.delete(teamId);
+  const expires = Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400;
+  return json({ teamId }, 200, { 'set-cookie': sessionCookie(`${teamId}.${expires}.${await hmac(env, `${teamId}.${expires}`)}`, SESSION_DAYS * 86400, url) });
 }

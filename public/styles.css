@@ -370,3 +370,9 @@ code { font-size: 0.9em; background: var(--track); padding: 0.05rem 0.3rem; over
 .tbar .vgain { font-size: 0.95rem; margin-top: 0.1rem; }
 .tbar .vgain b.pos { color: var(--up); }
 .tbar .vgain b.neg { color: var(--paint); }
+
+.pin { display: grid; gap: 0.5rem; margin-top: 1rem; padding: 0.9rem 1rem; border: 2px solid var(--ink); border-radius: 10px; background: rgba(255, 245, 230, 0.7); }
+.pin input { font: inherit; font-size: 1.4rem; letter-spacing: 0.3em; padding: 0.5rem 0.7rem; border: 2px solid var(--ink); border-radius: 8px; background: var(--floor); color: var(--ink); }
+.pin .warn { color: var(--paint); font-weight: 700; margin: 0; }
+.team-pick.picked { background: var(--ink); color: var(--floor); }
+.actions { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: center; margin: 0.8rem 0 0.2rem; }

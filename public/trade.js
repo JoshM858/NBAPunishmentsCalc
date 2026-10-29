@@ -231,6 +231,20 @@ export function tradeContext({ league, pro, freeAgents = [], injuries = new Map(
   };
 }
 
+// A message ready to paste into the group chat. `give`/`get` are lists of player names from A's side.
+export function tradeSummary(result, { a, b, give, get }) {
+  const gain = (v) => `${v < -0.05 ? '−' : '+'}${Math.abs(v).toFixed(1)}`;
+  const edge = result.winner === null ? 'Dead even.' : `Edge to ${result.winner === 'a' ? a : b}.`;
+  return [
+    'Trade idea (from Punishment Watch)',
+    `${a} gives: ${give.join(', ')}`,
+    `${b} gives: ${get.join(', ')}`,
+    `Rating: ${result.stars} out of 5 stars, ${result.label.toLowerCase()}. ${edge}`,
+    `${a} ${gain(result.a.gain)} points a week, ${b} ${gain(result.b.gain)} points a week.`,
+    'Expected lineup points over the rest of the season; injuries can swing any trade.',
+  ].join('\n');
+}
+
 // Judge a trade: A gives `giveIds` and gets `getIds` from B. Returns each side's gain in points a week,
 // the winner, the stars and plain-language notes.
 export function evaluateTrade(ctx, teamA, teamB, giveIds, getIds) {

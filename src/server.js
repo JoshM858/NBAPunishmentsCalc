@@ -45,7 +45,12 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     if (url.pathname.startsWith('/api/')) {
-      const out = await handleApi(new Request(url, { method: req.method }), env, { waitUntil: (p) => p?.catch?.(() => {}) });
+      const chunks = [];
+      let size = 0;
+      if (req.method === 'POST') for await (const c of req) if ((size += c.length) < 4096) chunks.push(c); // sign-in bodies are tiny
+      const init = { method: req.method, headers: req.headers.cookie ? { cookie: req.headers.cookie } : {} };
+      if (req.method === 'POST') init.body = Buffer.concat(chunks);
+      const out = await handleApi(new Request(url, init), env, { waitUntil: (p) => p?.catch?.(() => {}) });
       res.writeHead(out.status, Object.fromEntries(out.headers));
       return res.end(Buffer.from(await out.arrayBuffer()));
     }
