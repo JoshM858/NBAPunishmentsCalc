@@ -81,6 +81,7 @@ export function parseLeague(raw, fallbackSeason) {
 export function parseProSchedule(raw) {
   const games = new Map(); // proTeamId -> Map(sp -> game)
   const spDate = new Map(); // sp -> earliest tip-off (ms)
+  const spLast = new Map(); // sp -> latest tip-off (ms)
   const abbrev = new Map();
   for (const t of raw?.settings?.proTeams || []) {
     abbrev.set(t.id, t.abbrev || '');
@@ -92,10 +93,11 @@ export function parseProSchedule(raw) {
       const sp = Number(key);
       bySP.set(sp, { date: num(g.date), opp: g.homeProTeamId === t.id ? g.awayProTeamId : g.homeProTeamId });
       if (!spDate.has(sp) || g.date < spDate.get(sp)) spDate.set(sp, num(g.date));
+      if (!spLast.has(sp) || g.date > spLast.get(sp)) spLast.set(sp, num(g.date));
     }
     games.set(t.id, bySP);
   }
-  return { games, spDate, abbrev, dayOffset: spDayOffset(spDate) };
+  return { games, spDate, spLast, abbrev, dayOffset: spDayOffset(spDate) };
 }
 
 // ESPN scoring period N is one US Eastern calendar day, with no period at all on days with no games.
@@ -110,6 +112,18 @@ function spDayOffset(spDate) {
   for (const [off, n] of counts) if (!best || n > best[1]) best = [off, n];
   return best ? best[0] : null;
 }
+
+const GAME_LENGTH = 3.5 * 3_600_000; // tip-off to final buzzer, with overtime and delays to spare
+
+// ESPN keeps a scoring period "current" for hours after its last game ends. Once every game that day
+// has had time to finish, the day is done and belongs in the recap, whatever ESPN's counter says.
+export function isDayDone(pro, sp, now) {
+  const last = pro.spLast?.get(sp);
+  return last != null && now >= last + GAME_LENGTH;
+}
+
+// The last scoring period whose results are final.
+export const finishedThrough = (league, pro, now) => (isDayDone(pro, league.currentSP, now) ? league.currentSP : league.currentSP - 1);
 
 // UTC midnight (ms) of the ET calendar date for scoring period `sp`, or null if unknown.
 export function spDay(pro, sp) {
@@ -425,6 +439,7 @@ export function buildModel({ league, pro, weeks, daily, dayDetail, now, source }
   const teamById = new Map(league.teams.map((t) => [t.id, t]));
   const nowSt = standings(league.teams, daily, week.sps, cur);
   const prevSt = week.sps.includes(cur - 1) ? standings(league.teams, daily, week.sps, cur - 1) : null;
+  const through = finishedThrough(league, pro, now);
 
   const rows = league.teams.map((t) => {
     const st = nowSt.get(t.id);
@@ -465,15 +480,17 @@ export function buildModel({ league, pro, weeks, daily, dayDetail, now, source }
     loser,
     safety,
     gap: loser && safety ? r1(safety.projFinal - loser.projFinal) : 0,
-    recap: buildRecap({ league, pro, weeks, daily, dayDetail, cur, teamById }),
-    shame: weeklyResults(league.teams, daily, weeks, cur, pro),
+    recap: buildRecap({ league, pro, weeks, daily, dayDetail, cur: through + 1, teamById }),
+    recapLive: through < cur ? liveRecap({ league, pro, weeks, daily, dayDetail, cur, teamById }) : null,
+    shame: weeklyResults(league.teams, daily, weeks, through + 1, pro),
     source,
     weeksSource: weeks.source || null,
     weekStart: weeks.weekStart ?? null,
   };
 }
 
-export function buildRecap({ league, pro, weeks, daily, dayDetail, cur, teamById }) {
+// `live`: the day is still being played, so these are points so far rather than results.
+export function buildRecap({ league, pro, weeks, daily, dayDetail, cur, teamById, live = false }) {
   const D = cur - 1;
   const week = weekOf(weeks, D);
   if (!week) return null;
@@ -515,7 +532,8 @@ export function buildRecap({ league, pro, weeks, daily, dayDetail, cur, teamById
     label: dayLabel(pro, D),
     week: { ...week, label: weekLabel(pro, week) },
     dayNumber: week.sps.indexOf(D) + 1,
-    final: D === week.sps.at(-1),
+    final: !live && D === week.sps.at(-1),
+    live,
     rows,
     climbers: rows.filter((r) => r.move > 0).sort((a, b) => b.move - a.move),
     fallers: rows.filter((r) => r.move < 0).sort((a, b) => a.move - b.move),
@@ -525,6 +543,12 @@ export function buildRecap({ league, pro, weeks, daily, dayDetail, cur, teamById
     best,
     worst,
   };
+}
+
+// Today so far, once any team has scored: the recap for a day ESPN hasn't finished.
+function liveRecap(args) {
+  const r = buildRecap({ ...args, cur: args.cur + 1, live: true });
+  return r && r.rows.some((x) => x.dayPts > 0) ? r : null;
 }
 
 export function weeklyResults(teams, daily, weeks, cur, pro) {

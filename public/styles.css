@@ -314,3 +314,7 @@ code { font-size: 0.9em; background: var(--track); padding: 0.05rem 0.3rem; over
 @media (prefers-reduced-motion: reduce) {
   .paint { animation: none; }
 }
+
+.seg { display: inline-flex; border: 2px solid var(--ink); border-radius: 999px; overflow: hidden; margin-bottom: 0.9rem; }
+.seg button { font-family: inherit; font-weight: 600; font-size: 0.9rem; line-height: 1; padding: 0.55rem 0.9rem; background: none; border: 0; color: var(--ink); cursor: pointer; }
+.seg button[aria-pressed='true'] { background: var(--ink); color: var(--floor); }

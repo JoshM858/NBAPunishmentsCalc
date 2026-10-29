@@ -3,7 +3,7 @@
 // A source is { config(), league(views, { sp, fresh, past }), pro(), now(), history?(), offline? } (see sources.js).
 import {
   parseLeague, parseProSchedule, parseWeekStart, buildWeeks, currentWeek, weekOf, dailyFromSchedule, scheduleCovers,
-  dayFromRoster, weeklyResults, checkTotals,
+  dayFromRoster, weeklyResults, checkTotals, finishedThrough,
 } from './logic.js';
 
 export const LIVE_VIEWS = ['mSettings', 'mTeam', 'mRoster', 'mMatchupScore', 'mStatus'];
@@ -99,7 +99,7 @@ export async function loadSeasonDays(ctx, src, { cache } = {}) {
     }
   }
   return {
-    shame: weeklyResults(league.teams, daily, ctx.weeks, cur, pro),
+    shame: weeklyResults(league.teams, daily, ctx.weeks, finishedThrough(league, pro, src.now()) + 1, pro),
     check: checkTotals(league.teams, daily, cur),
   };
 }

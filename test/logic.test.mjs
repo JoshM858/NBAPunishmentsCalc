@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createDemo } from '../public/demo.js';
 import {
-  parseLeague, parseProSchedule, parseEntry, buildWeeks, currentWeek, weekOf, dayLabel, spDay, parseWeekStart, dailyFromSchedule,
+  parseLeague, parseProSchedule, parseEntry, buildWeeks, currentWeek, weekOf, dayLabel, spDay, parseWeekStart, isDayDone, dailyFromSchedule,
   dayFromRoster, buildModel, checkTotals, slimLeague, slimPro,
 } from '../public/logic.js';
 import { LIVE_VIEWS, loadLeague, loadSeasonDays, neededDays, historyOf } from '../public/pipeline.js';
@@ -200,6 +200,39 @@ assert.equal(m.weeksSource, 'espn');
   assert.ok(season.check.every((c) => c.ok), 'totals check is green from a snapshot alone');
   assert.deepEqual(season.shame, full.shame);
   await assert.rejects(() => source.league(['mRoster'], { sp: 1 }), /doesn.t include day 1/);
+}
+
+/* ---------- The recap follows the last finished day, not ESPN's counter ---------- */
+
+{
+  const HOUR = 3_600_000;
+  const src = createDemo();
+  const ctx = await loadLeague(src, { forceRoster: true });
+  const cur = ctx.league.currentSP;
+  const last = ctx.pro.spLast.get(cur);
+  assert.ok(!isDayDone(ctx.pro, cur, last + 3 * HOUR), 'still inside the last game');
+  assert.ok(isDayDone(ctx.pro, cur, last + 3.6 * HOUR));
+  assert.ok(!isDayDone(realPro, 15, 1e15), 'a day with no games is never "done"');
+
+  // During the games the recap is yesterday; once they're over it is today, though ESPN still says `cur`
+  const during = buildModel({ ...ctx, now: src.now() });
+  assert.equal(during.recap.sp, cur - 1);
+  assert.equal(during.recap.live, false);
+  // ...and today so far is offered alongside it, with the points the team has right now
+  assert.equal(during.recapLive.sp, cur);
+  assert.equal(during.recapLive.live, true);
+  assert.equal(during.recapLive.final, false);
+  for (const r of during.recapLive.rows) assert.equal(r.dayPts, during.rows.find((x) => x.id === r.id).todayPts);
+  const after = buildModel({ ...ctx, now: last + 4 * HOUR });
+  assert.equal(after.recap.sp, cur);
+  assert.equal(after.recapLive, null, 'nothing is live once the day is done');
+  assert.ok(after.recap.best && after.recap.worst, 'player of the day comes from the finished day');
+  for (const r of after.recap.rows) {
+    assert.equal(r.dayPts, ctx.daily.get(r.id).get(cur));
+    const week = weekOf(weeks, cur).sps.filter((sp) => sp <= cur).reduce((s, sp) => s + (ctx.daily.get(r.id).get(sp) ?? 0), 0);
+    assert.ok(Math.abs(r.weekPts - week) < 0.05, 'week total includes the finished day');
+  }
+  assert.equal(after.week.dayNumber, during.week.dayNumber, 'the This week tab is unchanged');
 }
 
 /* ---------- checkTotals tolerates today being in or out ---------- */

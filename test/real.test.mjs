@@ -61,5 +61,22 @@ let sum = 0;
 for (const sp of ctx.weeks[0].sps) sum += ctx.daily.get(w1.losers[0].id).get(sp) ?? 0;
 assert.ok(Math.abs(sum - w1.losers[0].pts) < 0.05);
 
+// The bug that showed Tuesday's 75 instead of Wednesday's 357: games over, ESPN still on period 9
+{
+  const lastTip = ctx.pro.spLast.get(real.cur);
+  const during = buildModel({ ...ctx, now: lastTip + 3_600_000 });
+  assert.equal(during.recap.sp, real.cur - 1, 'an hour after the last tip-off the day is not finished');
+  assert.equal(during.recapLive.label, 'Wed 28 Oct', 'but Wednesday so far is offered');
+  for (const r of during.recapLive.rows) assert.equal(r.dayPts, ctx.daily.get(r.id).get(real.cur));
+  const done = buildModel({ ...ctx, now: lastTip + 4 * 3_600_000 });
+  assert.equal(done.recap.sp, real.cur, 'four hours later the recap moves on to the finished day');
+  assert.equal(done.recap.label, 'Wed 28 Oct');
+  for (const r of done.recap.rows) {
+    assert.equal(r.dayPts, ctx.daily.get(r.id).get(real.cur));
+    assert.equal(r.weekPts, model.rows.find((x) => x.id === r.id).weekPts, 'recap and This week agree');
+    assert.ok(r.dayPts > 150, `${r.name}: a full day, not the ${r.dayPts} from the day before`);
+  }
+}
+
 console.log('All real-data tests passed');
 for (const w of shame) console.log(`Week ${w.week} (${w.label}) last place: team ${w.losers.map((l) => `${l.id} on ${l.pts}`)}, top ${w.top.pts}`);

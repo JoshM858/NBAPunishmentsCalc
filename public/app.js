@@ -93,7 +93,7 @@ const dayCache = (cfg) => ({
 
 /* ---------- Load ---------- */
 
-const state = { tab: 'week', model: null, ctx: null, src: null, updated: 0, tried: 0, busy: false, check: null };
+const state = { tab: 'week', recapView: 'live', model: null, ctx: null, src: null, updated: 0, tried: 0, busy: false, check: null };
 
 async function load({ fresh = false } = {}) {
   if (state.busy) return;
@@ -225,7 +225,8 @@ function renderWeek(m) {
 }
 
 function renderRecap(m) {
-  const r = m.recap;
+  const live = m.recapLive && state.recapView !== 'final' ? m.recapLive : null;
+  const r = live || m.recap;
   if (!r) return '<p class="empty">The first recap appears after the season’s opening night.</p>';
 
   const lines = [];
@@ -263,8 +264,14 @@ function renderRecap(m) {
       </tr>`)
     .join('');
 
-  return `<h2 class="panel-title">${esc(r.label)}</h2>
-    <p class="lede">Results for week ${r.week.id}, day ${r.dayNumber} of ${r.week.sps.length} (US date).</p>
+  const switcher = m.recapLive
+    ? `<div class="seg" role="group" aria-label="Which day">
+        <button type="button" data-recap="live" aria-pressed="${Boolean(live)}">${esc(m.recapLive.label)}, so far</button>
+        <button type="button" data-recap="final" aria-pressed="${!live}">${esc(m.recap.label)}, final</button>
+      </div>`
+    : '';
+  return `${switcher}<h2 class="panel-title">${esc(r.label)}${live ? ' so far' : ''}</h2>
+    <p class="lede">${live ? 'Games are still being played, so these are points so far for' : 'Results for'} week ${r.week.id}, day ${r.dayNumber} of ${r.week.sps.length} (US date).</p>
     <ul class="movers">${lines.join('')}</ul>
     <div class="scroll"><table>
       <thead><tr><th scope="col" class="num">Pos</th><th scope="col">Team</th><th scope="col" class="num">Day</th><th scope="col" class="num">Week</th></tr></thead>
@@ -385,6 +392,13 @@ document.querySelector('.tabs').addEventListener('keydown', (e) => {
   const i = tabs.findIndex((t) => t.dataset.tab === state.tab);
   if (e.key === 'ArrowRight') showTab(tabs[(i + 1) % tabs.length].dataset.tab);
   if (e.key === 'ArrowLeft') showTab(tabs[(i + tabs.length - 1) % tabs.length].dataset.tab);
+});
+
+document.addEventListener('click', (e) => {
+  const view = e.target.closest('[data-recap]')?.dataset.recap;
+  if (!view || !state.model) return;
+  state.recapView = view;
+  $('panel-recap').innerHTML = renderRecap(state.model);
 });
 
 document.addEventListener('click', async (e) => {
