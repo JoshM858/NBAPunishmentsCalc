@@ -551,35 +551,62 @@ function mulberry32(seed) {
 // Plays the rest of the week many times: each player gets a true level (uncertain), then a chain of
 // played/missed games, then a noisy score per game he plays. Returns each team's chance of finishing last
 // and the spread of its remaining points. Seeded so the numbers don't jitter between renders.
-export function simulateWeek(rows, sims = 4000) {
-  let seed = 7;
-  for (const r of rows) seed = (Math.imul(seed, 31) + Math.round(r.current * 10 + r.mean * 7)) | 0;
-  const rand = mulberry32(seed);
-  const gauss = () => Math.sqrt(-2 * Math.log(rand() || 1e-12)) * Math.cos(2 * Math.PI * rand());
+// A number for any team id (numbers as they are, anything else hashed)
+const idHash = (id) => (Number.isFinite(Number(id)) ? Number(id) : [...String(id)].reduce((h, c) => (Math.imul(h, 31) + c.charCodeAt(0)) | 0, 7));
+
+// Each team in each simulation gets its own random stream (from `seed`, the simulation number and the team), so a team
+// whose roster has not changed plays out identically between two runs. That makes a before/after comparison show the
+// effect of the change instead of random noise. `seed` defaults to one derived from the rows. The result's `.seed`
+// is the one used, to pass back in for the "after" run. `reuse` (the previous run's `.cache`) lets teams whose
+// inputs are unchanged skip the work and keep their earlier results exactly.
+export function simulateWeek(rows, sims = 4000, seed = null, reuse = null) {
+  let derived = 7;
+  for (const r of rows) derived = (Math.imul(derived, 31) + Math.round(r.current * 10 + r.mean * 7)) | 0;
+  const base = seed ?? derived;
+  const stream = (sim, id) => {
+    const rand = mulberry32((base ^ Math.imul(sim + 1, 0x9e3779b1) ^ Math.imul(idHash(id) + 7, 0x85ebca6b)) | 0);
+    rand();
+    rand();
+    return { rand, gauss: () => Math.sqrt(-2 * Math.log(rand() || 1e-12)) * Math.cos(2 * Math.PI * rand()) };
+  };
   const sigma2 = Math.log(1 + MODEL.gameCV ** 2);
   const sigma = Math.sqrt(sigma2);
   const hits = new Map(rows.map((r) => [r.id, 0]));
   const sum = new Map(rows.map((r) => [r.id, 0]));
   const sumSq = new Map(rows.map((r) => [r.id, 0]));
+  const usable = reuse && reuse.base === base && reuse.sims === sims;
+  const teams = new Map(
+    rows.map((r) => {
+      const sig = JSON.stringify([r.current, r.plan || []]);
+      const old = usable ? reuse.teams.get(r.id) : null;
+      return [r.id, old && old.sig === sig ? { sig, rests: old.rests, reused: true } : { sig, rests: new Float64Array(sims), reused: false }];
+    }),
+  );
   for (let i = 0; i < sims; i++) {
     let min = Infinity;
     let losers = [];
     for (const r of rows) {
+      const mine = teams.get(r.id);
       let rest = 0;
-      const manager = Math.exp(MODEL.teamSd * gauss() - (MODEL.teamSd * MODEL.teamSd) / 2);
-      for (const pl of r.plan || []) {
-        const level = Math.exp(pl.levelSd * gauss() - (pl.levelSd * pl.levelSd) / 2);
-        let missed = false;
-        for (const g of pl.games) {
-          if (g.forced) {
-            missed = true; // ESPN says he is still out
-            continue;
+      if (mine.reused) rest = mine.rests[i];
+      else {
+        const { rand, gauss } = stream(i, r.id);
+        const manager = Math.exp(MODEL.teamSd * gauss() - (MODEL.teamSd * MODEL.teamSd) / 2);
+        for (const pl of r.plan || []) {
+          const level = Math.exp(pl.levelSd * gauss() - (pl.levelSd * pl.levelSd) / 2);
+          let missed = false;
+          for (const g of pl.games) {
+            if (g.forced) {
+              missed = true; // ESPN says he is still out
+              continue;
+            }
+            missed = rand() < (g.anchor ? g.miss : missed ? pl.persist : MODEL.base);
+            if (!missed && g.picked) rest += pl.mu * level * g.w * Math.exp(sigma * gauss() - sigma2 / 2);
           }
-          missed = rand() < (g.anchor ? g.miss : missed ? pl.persist : MODEL.base);
-          if (!missed && g.picked) rest += pl.mu * level * g.w * Math.exp(sigma * gauss() - sigma2 / 2);
         }
+        rest *= manager;
+        mine.rests[i] = rest;
       }
-      rest *= manager;
       sum.set(r.id, sum.get(r.id) + rest);
       sumSq.set(r.id, sumSq.get(r.id) + rest * rest);
       const v = r.current + rest;
@@ -588,15 +615,18 @@ export function simulateWeek(rows, sims = 4000) {
     }
     for (const id of losers) hits.set(id, hits.get(id) + 1 / losers.length);
   }
-  return new Map(rows.map((r) => {
+  const out = new Map(rows.map((r) => {
     const m = sum.get(r.id) / sims;
     return [r.id, { odds: hits.get(r.id) / sims, mean: m, sd: Math.sqrt(Math.max(0, sumSq.get(r.id) / sims - m * m)) }];
   }));
+  out.seed = base;
+  out.cache = { base, sims, teams };
+  return out;
 }
 
 /* ---------- Model for the UI ---------- */
 
-export function buildModel({ league, pro, weeks, daily, dayDetail, now, source, dayDone }) {
+export function buildModel({ league, pro, weeks, daily, dayDetail, now, source, dayDone, seed = null, reuse = null }) {
   const cur = league.currentSP;
   const week = currentWeek(weeks, cur);
   const teamById = new Map(league.teams.map((t) => [t.id, t]));
@@ -625,7 +655,7 @@ export function buildModel({ league, pro, weeks, daily, dayDetail, now, source, 
     };
   });
 
-  const sim = simulateWeek(rows.map((r) => ({ id: r.id, current: r.weekPts, mean: r.projRemaining, plan: r.plan })));
+  const sim = simulateWeek(rows.map((r) => ({ id: r.id, current: r.weekPts, mean: r.projRemaining, plan: r.plan })), 4000, seed, reuse);
   for (const r of rows) {
     r.odds = sim.get(r.id).odds;
     r.sd = sim.get(r.id).sd;
@@ -651,6 +681,8 @@ export function buildModel({ league, pro, weeks, daily, dayDetail, now, source, 
     recapLive: through < cur ? liveRecap({ league, pro, weeks, daily, dayDetail, cur, teamById }) : null,
     shame: weeklyResults(league.teams, daily, weeks, through + 1, pro),
     source,
+    simSeed: sim.seed,
+    simCache: sim.cache,
     weeksSource: weeks.source || null,
     weekStart: weeks.weekStart ?? null,
   };

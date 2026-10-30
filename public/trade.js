@@ -1,6 +1,6 @@
 // Trade analyser: what a trade is worth to each team over the rest of the season, and how fair it is.
 // Pure functions, no DOM. Method (and why) is in the README under "Trade tab and the star rating".
-import { spDay } from './logic.js';
+import { buildModel, currentWeek, projectTeam, simulateWeek, spDay } from './logic.js';
 
 export const TRADE = {
   prior: 16, // games of weight given to ESPN's preseason projection (fitted on last season: best of 8-24)
@@ -332,4 +332,79 @@ export function multiSummary(result, moves) {
   lines.push(result.teams.filter((r) => r.involved).map((t) => `${t.name} ${gain(t.gain)}`).join(', ') + ' points a week.');
   lines.push('Expected lineup points over the rest of the season; injuries can swing any trade.');
   return lines.join('\n');
+}
+
+/* ---------- What if the trade happens? ---------- */
+
+// The league with the trade done. Players who move go on the new team's bench for today (his new manager has not
+// set him in a lineup yet); points already scored this week stay with the team that scored them.
+export function applyMoves(league, moves) {
+  const owner = new Map();
+  for (const t of league.teams) for (const p of t.roster) owner.set(p.playerId, { team: t.id, player: p });
+  const valid = moves.filter((m) => owner.get(m.playerId)?.team === m.from && m.to !== m.from && league.teams.some((t) => t.id === m.to));
+  const leaving = new Set(valid.map((m) => m.playerId));
+  return {
+    ...league,
+    teams: league.teams.map((t) => ({
+      ...t,
+      roster: [...t.roster.filter((p) => !leaving.has(p.playerId)), ...valid.filter((m) => m.to === t.id).map((m) => ({ ...owner.get(m.playerId).player, slot: 12 }))],
+    })),
+  };
+}
+
+// What the odds are right now, worked out once so every trade you try only has to re-run the teams it changes.
+// `input` is what buildModel takes.
+export function tradeBaseline(input) {
+  const { league, pro, weeks } = input;
+  const before = buildModel(input);
+  const week = currentWeek(weeks, league.currentSP);
+  const upcoming = weeks.find((w) => w.sps[0] > week.sps.at(-1)) || null;
+  const typical = upcoming ? typicalWeek(league, pro, upcoming, null, null) : null;
+  return { input, before, upcoming, typical };
+}
+
+// A full week with nothing scored yet, from the best starters each team could field every day.
+function typicalWeek(league, pro, upcoming, seed, reuse) {
+  const rows = league.teams.map((t) => {
+    // currentSP one day before the week, so every day uses the best starters rather than today's set lineup
+    const p = projectTeam(t, { week: upcoming, currentSP: upcoming.sps[0] - 1, pro, now: 0, activeSlots: league.activeSlots });
+    return { id: t.id, current: 0, mean: p.mean, plan: p.plan };
+  });
+  return simulateWeek(rows, 4000, seed, reuse);
+}
+
+// The weekly punishment odds with the trade done, next to the odds now: for this week's remaining games and for a
+// typical full week from here on. Teams the trade does not touch get identical random numbers and are not re-run,
+// so any change shown is from the trade, not luck.
+export function simulateTrade(baseline, moves) {
+  const { input, before, upcoming, typical } = baseline;
+  const { league, pro } = input;
+  const after = applyMoves(league, moves);
+  const nameOf = (id) => league.teams.find((t) => t.id === id)?.name ?? `Team ${id}`;
+  const ownerOf = (id) => league.teams.find((t) => t.id === id)?.owner ?? '';
+
+  let thisWeek = null;
+  if (before.rows.some((r) => r.gamesLeft > 0)) {
+    const next = buildModel({ ...input, league: after, seed: before.simSeed, reuse: before.simCache });
+    const post = new Map(next.rows.map((r) => [r.id, r]));
+    thisWeek = {
+      label: `Rest of week ${before.week.id}`,
+      rows: before.rows.map((r) => ({ id: r.id, name: r.name, owner: r.owner, current: r.weekPts, risk0: r.odds, risk1: post.get(r.id).odds, final0: r.projFinal, final1: post.get(r.id).projFinal })),
+      loser0: before.loser?.id ?? null,
+      loser1: next.loser?.id ?? null,
+    };
+  }
+
+  let nextWeek = null;
+  if (upcoming && typical) {
+    const b = typicalWeek(after, pro, upcoming, typical.seed, typical.cache);
+    const top = (m) => [...m].sort((x, y) => y[1].odds - x[1].odds)[0]?.[0] ?? null;
+    nextWeek = {
+      label: `A typical week from here on (week ${upcoming.id})`,
+      rows: league.teams.map((t) => ({ id: t.id, name: nameOf(t.id), owner: ownerOf(t.id), current: 0, risk0: typical.get(t.id).odds, risk1: b.get(t.id).odds, final0: typical.get(t.id).mean, final1: b.get(t.id).mean })),
+      loser0: top(typical),
+      loser1: top(b),
+    };
+  }
+  return { thisWeek, nextWeek };
 }

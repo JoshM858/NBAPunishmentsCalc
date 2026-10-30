@@ -5,7 +5,9 @@ import {
   STARS, TRADE, assign, dayPicks, dayValue, evaluateMultiTrade, evaluateTrade, maxMatching, multiSummary, normalCdf, playChance, playerValue, rosterValue,
   starsFor, teamGamesThrough, tradeContext, tradeGains, tradeSummary, verdict, winnerConfidence, shortDate,
 } from '../public/trade.js';
-import { injuryMap } from '../public/logic.js';
+import { injuryMap, buildModel, simulateWeek } from '../public/logic.js';
+import { applyMoves, simulateTrade, tradeBaseline } from '../public/trade.js';
+import { loadLeague } from '../public/pipeline.js';
 
 const OUT_STATUSES_TEST = new Set(['OUT', 'SUSPENSION', 'INJURY_RESERVE']);
 const fixture = (f) => JSON.parse(readFileSync(new URL(`./fixtures/${f}`, import.meta.url), 'utf8'));
@@ -342,6 +344,76 @@ const near = (a, b, eps = 1e-6, msg) => assert.ok(Math.abs(a - b) <= eps, `${msg
   assert.match(text, /^Trade idea \(from Punishment Watch\)\nAlpha sends: Wemby to Bravo\nBravo sends: Cade to Charlie\nCharlie sends: Curry to Alpha\n/);
   assert.match(text, /Biggest winner: \w+\. Biggest loser: Alpha\./);
   assert.match(text, /Alpha −/);
+}
+
+/* ---------- What if the trade happens? ---------- */
+
+{
+  const real = fixture('real-league.json');
+  const proRaw = fixture('pro-2027.json');
+  const src = { config: async () => ({ configured: true, season: 2027, hideTeams: ['3'] }), pro: async () => proRaw, league: async (v, { sp } = {}) => (sp ? real.days[sp] : real.league), now: () => Date.parse(real.capturedAt) };
+  const ctx = await loadLeague(src);
+  const input = { ...ctx, now: src.now() };
+  const league = ctx.league;
+  const before = buildModel(input);
+
+  // applyMoves: the trade done, nothing mutated, movers on the new bench
+  const giver = league.teams.find((t) => t.id === before.rows[0].id); // the strongest team
+  const taker = league.teams.find((t) => t.id === before.loser.id); // the projected loser
+  const star = giver.roster.filter((p) => p.slot <= 11).sort((a, b) => b.seasonAvg - a.seasonAvg)[0];
+  const sizes = league.teams.map((t) => t.roster.length);
+  const moved = applyMoves(league, [{ playerId: star.playerId, from: giver.id, to: taker.id }, { playerId: 1234567, from: giver.id, to: taker.id }, { playerId: star.playerId, from: taker.id, to: giver.id }]);
+  assert.deepEqual(league.teams.map((t) => t.roster.length), sizes, 'the original league is untouched');
+  assert.equal(moved.teams.find((t) => t.id === giver.id).roster.length, giver.roster.length - 1);
+  assert.equal(moved.teams.find((t) => t.id === taker.id).roster.length, taker.roster.length + 1);
+  const arrived = moved.teams.find((t) => t.id === taker.id).roster.find((p) => p.playerId === star.playerId);
+  assert.equal(arrived.slot, 12, 'he starts on the bench');
+  assert.ok(star.slot <= 11 && giver.roster.find((p) => p.playerId === star.playerId).slot === star.slot, 'and the original entry still shows where he was');
+  assert.equal(moved.teams.length, league.teams.length);
+  assert.deepEqual(applyMoves(league, []).teams.map((t) => t.roster.length), sizes);
+
+  // The baseline is exactly the odds the page already shows, and no change leaves everything alone
+  const base = tradeBaseline(input);
+  assert.deepEqual(base.before.rows.map((r) => [r.id, r.odds]), before.rows.map((r) => [r.id, r.odds]));
+  const none = simulateTrade(base, []);
+  assert.ok(none.thisWeek.rows.every((r) => r.risk0 === r.risk1 && r.final0 === r.final1), 'no trade, no change');
+  assert.ok(none.nextWeek.rows.every((r) => r.risk0 === r.risk1));
+  assert.equal(none.thisWeek.loser0, none.thisWeek.loser1);
+
+  // Giving the strongest team's best player to the projected loser helps the loser and hurts the giver
+  const mv = [{ playerId: star.playerId, from: giver.id, to: taker.id }];
+  const r = simulateTrade(base, mv);
+  const row = (wk, id) => wk.rows.find((x) => x.id === id);
+  for (const wk of [r.thisWeek, r.nextWeek]) {
+    assert.ok(Math.abs(wk.rows.reduce((s, x) => s + x.risk0, 0) - 1) < 1e-9, 'odds add up to 1 before');
+    assert.ok(Math.abs(wk.rows.reduce((s, x) => s + x.risk1, 0) - 1) < 1e-9, 'and after');
+    assert.ok(row(wk, taker.id).final1 > row(wk, taker.id).final0, 'the receiver projects higher');
+    assert.ok(row(wk, giver.id).final1 < row(wk, giver.id).final0, 'the giver projects lower');
+    assert.ok(row(wk, taker.id).risk1 < row(wk, taker.id).risk0, 'the receiver is less likely to finish last');
+    assert.ok(row(wk, giver.id).risk1 > row(wk, giver.id).risk0, 'the giver is more likely to');
+    // teams the trade does not touch project exactly as before
+    for (const x of wk.rows.filter((q) => q.id !== giver.id && q.id !== taker.id)) assert.equal(x.final1, x.final0, `${x.name} untouched`);
+  }
+  assert.match(r.thisWeek.label, /^Rest of week 2/);
+  assert.match(r.nextWeek.label, /week 3/);
+  assert.ok(row(r.thisWeek, taker.id).current === before.rows.find((x) => x.id === taker.id).weekPts, 'points already scored stay put');
+
+  // The shortcut gives exactly what running everything from scratch gives
+  const scratch = buildModel({ ...input, league: applyMoves(league, mv), seed: before.simSeed });
+  for (const x of scratch.rows) assert.equal(row(r.thisWeek, x.id).risk1, x.odds, `${x.name}: reuse equals a fresh run`);
+
+  // Trading the loser's star away makes them the likelier loser
+  const loserStar = taker.roster.filter((p) => p.slot <= 11).sort((a, b) => b.seasonAvg - a.seasonAvg)[0];
+  const worse = simulateTrade(base, [{ playerId: loserStar.playerId, from: taker.id, to: giver.id }]);
+  assert.ok(row(worse.thisWeek, taker.id).risk1 > row(worse.thisWeek, taker.id).risk0);
+
+  // The projected loser can change hands
+  const flip = simulateTrade(base, [{ playerId: star.playerId, from: giver.id, to: taker.id }, ...giver.roster.filter((p) => p.slot <= 11 && p.playerId !== star.playerId).sort((a, b) => b.seasonAvg - a.seasonAvg).slice(0, 2).map((p) => ({ playerId: p.playerId, from: giver.id, to: taker.id }))]);
+  assert.notEqual(flip.nextWeek.loser1, flip.nextWeek.loser0, 'gifting three starters to the projected loser moves the "last place" label to someone else');
+
+  // Once the week is over only the typical week is shown
+  const over = tradeBaseline({ ...input, league: { ...league, teams: league.teams.map((t) => ({ ...t, roster: t.roster.map((p) => ({ ...p, proTeamId: 0 })) })) } });
+  assert.equal(simulateTrade(over, []).thisWeek, null, 'no games left this week, so nothing to re-run');
 }
 
 /* ---------- The message you can paste into the group chat ---------- */

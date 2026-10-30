@@ -95,7 +95,7 @@ const dayCache = (cfg) => ({
 /* ---------- Load ---------- */
 
 const state = { tab: 'week', recapView: 'live', model: null, ctx: null, src: null, updated: 0, tried: 0, busy: false, check: null, board: null, tz: 'Australia/Melbourne' };
-const trade = createTradeUI({ panel: $('panel-trade'), data: () => ({ ctx: state.ctx, src: state.src }) });
+const trade = createTradeUI({ panel: $('panel-trade'), data: () => ({ ctx: state.ctx, src: state.src, now: state.src?.now?.(), dayDone: boardDone() }) });
 const BOARD_POLL = 3 * 60_000;
 
 async function load({ fresh = false } = {}) {
@@ -440,6 +440,7 @@ function showTab(tab, focus = true) {
   state.tab = tab;
   try { localStorage.setItem('pw:tab', tab); } catch {}
   document.body.classList.toggle('wide', tab === 'trade'); // side-by-side rosters need room
+  if (tab !== 'trade') document.body.classList.remove('trading');
   for (const btn of document.querySelectorAll('[role=tab]')) {
     const on = btn.dataset.tab === tab;
     btn.setAttribute('aria-selected', on);
@@ -447,6 +448,7 @@ function showTab(tab, focus = true) {
     if (on && focus) btn.focus();
     $(btn.getAttribute('aria-controls')).hidden = !on;
   }
+  if (tab === 'trade' && state.ctx) trade.render();
 }
 
 document.querySelector('.tabs').addEventListener('click', (e) => {

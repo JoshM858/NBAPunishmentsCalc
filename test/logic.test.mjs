@@ -202,6 +202,36 @@ assert.equal(m.weeksSource, 'espn');
   await assert.rejects(() => source.league(['mRoster'], { sp: 1 }), /doesn.t include day 1/);
 }
 
+/* ---------- Simulation streams: each team plays out the same whatever the others do ---------- */
+
+{
+  const game = (sp) => ({ sp, miss: 0.05, anchor: sp === 1, picked: true, w: 1 });
+  const plan = (mu) => [{ mu, levelSd: 0.1, persist: 0.6, games: [1, 2, 3].map(game) }, { mu: mu * 0.8, levelSd: 0.1, persist: 0.6, games: [1, 2, 3].map(game) }];
+  const x = { id: 7, current: 100, mean: 200, plan: plan(40) };
+  const y = { id: 8, current: 90, mean: 190, plan: plan(38) };
+  const alone = simulateWeek([x], 1500, 5).get(7);
+  const together = simulateWeek([x, y], 1500, 5).get(7);
+  assert.equal(alone.mean, together.mean, 'a team’s own results do not depend on who else plays');
+  assert.equal(alone.sd, together.sd);
+  const reordered = simulateWeek([y, x], 1500, 5);
+  assert.equal(reordered.get(7).mean, alone.mean, 'nor on the order');
+  assert.equal(simulateWeek([x, y], 1500, 5).get(7).odds, simulateWeek([x, y], 1500, 5).get(7).odds, 'repeatable with a seed');
+  assert.notEqual(simulateWeek([x], 1500, 6).get(7).mean, alone.mean, 'a different seed gives different luck');
+  // non-numeric ids get their own streams too
+  const named = simulateWeek([{ ...x, id: 'a' }, { ...x, id: 'b' }], 1500, 5);
+  assert.notEqual(named.get('a').mean, named.get('b').mean, 'teams with identical plans still get different luck');
+  // reusing an earlier run gives exactly the same answer as running everything again, and only re-runs what changed
+  const first = simulateWeek([x, y], 1500, 5);
+  const y2 = { ...y, mean: 250, plan: plan(45) };
+  const again = simulateWeek([x, y2], 1500, 5, first.cache);
+  const fresh = simulateWeek([x, y2], 1500, 5);
+  for (const id of [7, 8]) assert.deepEqual(again.get(id), fresh.get(id), 'reuse changes nothing but speed');
+  assert.equal(again.cache.teams.get(7).reused, true, 'the unchanged team was not re-run');
+  assert.equal(again.cache.teams.get(8).reused, false);
+  assert.equal(simulateWeek([x, y2], 1500, 9, first.cache).cache.teams.get(7).reused, false, 'a different seed cannot reuse');
+  assert.notEqual(again.get(8).mean, first.get(8).mean);
+}
+
 /* ---------- Injury return dates in the weekly model ---------- */
 
 {
