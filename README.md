@@ -135,6 +135,12 @@ Check how the stars hold up on your own league's real trades with `npm run score
 
 Limits to know: injuries are the biggest unknown (a player's play rate misses by about 23 percentage points even when you know his history), so stars measure how sure we are, not a promise. The test used last season's data, and the free-agent list changes daily. Players you would receive who are currently out are flagged. Trades that need a team to drop players are flagged too.
 
+## Terms and Conditions record
+
+The first time someone opens the site they must pick their team (with their PIN if PINs are on) and answer **"Do you accept the Terms and Conditions?"**. The Terms include the punishment pact and sit behind links, with the Privacy policy, in `public/ui/legal.js` (edit the wording there; it is a friendly agreement among friends, not legal advice). Pressing **I accept** writes a record to the server with the team, the date and time, the terms version, the browser and a short one-way fingerprint of the network address. It is saved once per team, keeps its original time if repeated, and the site has no way to remove it, so nobody can back out. There is no decline or close button. The **League, Terms record** tab shows who has accepted and when. Raise `TERMS_VERSION` in `src/api.js` to make everyone accept again after changing the terms.
+
+It uses the same storage as the Trade block (PC version works as is; on Cloudflare bind the `BOARD` KV namespace). **Turn on team PINs** so each record is PIN-verified: without them anyone could accept on behalf of a team and the record says "Not PIN-verified". Without any server storage (GitHub Pages) it can only remember the acceptance in that browser, so use the PC or Cloudflare version if you want a real record.
+
 ## Install it on your phone
 
 Open the site in the phone's browser, then **Add to Home Screen** (iPhone: Share, Add to Home Screen; Android Chrome: menu, Install app). It opens full screen like an app, named **NBA Punishments**, with the icon in `public/icons/`. The logo is `public/icons/` (made from your picture); `docs/LOGO_PROMPT.md` has a prompt for ChatGPT to make a real logo and says which files to replace. The site only saves its page files for fast opening (`public/sw.js`); scores and odds are always fetched live, so they are never stale.

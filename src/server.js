@@ -50,7 +50,7 @@ const server = http.createServer(async (req, res) => {
       const chunks = [];
       let size = 0;
       if (req.method === 'POST') for await (const c of req) if ((size += c.length) < 4096) chunks.push(c); // sign-in bodies are tiny
-      const init = { method: req.method, headers: { 'x-real-ip': req.socket.remoteAddress || '', ...(req.headers.cookie ? { cookie: req.headers.cookie } : {}) } };
+      const init = { method: req.method, headers: { 'user-agent': req.headers['user-agent'] || '', 'x-real-ip': req.socket.remoteAddress || '', ...(req.headers.cookie ? { cookie: req.headers.cookie } : {}) } };
       if (req.method === 'POST') init.body = Buffer.concat(chunks);
       const out = await handleApi(new Request(url, init), env, { waitUntil: (p) => p?.catch?.(() => {}) });
       res.writeHead(out.status, Object.fromEntries(out.headers));

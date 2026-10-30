@@ -3,6 +3,7 @@ import { finishedThrough } from '../logic.js';
 import { draftBoard, draftValue, parseDraft } from '../draft.js';
 import { seasonStandings } from '../standings.js';
 import { esc, fmt, fmt1, moveBadge, panel } from '../ui/dom.js';
+import { fetchRecord } from '../ui/agree.js';
 import { headshot, spark } from '../ui/player.js';
 import { link } from '../ui/router.js';
 
@@ -94,8 +95,22 @@ async function draftHtml(app) {
 export default {
   id: 'league',
   label: 'League',
-  tabs: [{ id: '', label: 'Standings' }, { id: 'punishments', label: 'Punishments' }, { id: 'draft', label: 'Draft' }],
+  tabs: [{ id: '', label: 'Standings' }, { id: 'punishments', label: 'Punishments' }, { id: 'draft', label: 'Draft' }, { id: 'pact', label: 'Terms record' }],
   async render(app, el, route) {
+    if (route.tab === 'pact') {
+      el.innerHTML = '<p class="loading">Loading the record…</p>';
+      const rec = app.src.kind === 'api' ? await fetchRecord() : null;
+      if (app.route !== route) return;
+      const when = (ms) => new Date(ms).toLocaleString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: app.tz });
+      const rows = app.ctx.league.teams.map((t) => {
+        const a = rec?.accepted?.[t.id];
+        return `<tr><th scope="row"><div class="who-cell"><b>${esc(t.name)}</b><small>${esc(t.owner || '')}</small></div></th><td>${a ? `<span class="badge good">Accepted</span>` : '<span class="badge bad">Not yet</span>'}</td><td>${a ? esc(when(a.at)) : '–'}</td><td>${a ? (a.verified ? 'PIN-verified' : 'Not PIN-verified') : ''}</td></tr>`;
+      }).join('');
+      el.innerHTML = panel('Terms and Conditions record', rec?.enabled
+        ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Team</th><th>Status</th><th>Accepted at (${esc(app.tz.replace('_', ' '))})</th><th>Check</th></tr></thead><tbody>${rows}</tbody></table></div><p class="note" style="padding:12px 16px">Each acceptance is saved on the server with the team, the time, the terms version and the browser, and cannot be removed through the site. “PIN-verified” means the team signed in with its PIN when accepting; turn on team PINs so every record is verified.</p>`
+        : '<p class="empty">The record is saved on the server, so it needs the Cloudflare or PC version with storage switched on (README, Trade block).</p>', { cls: 'flush' });
+      return;
+    }
     if (route.tab === 'draft') {
       el.innerHTML = '<p class="loading">Loading the draft…</p>';
       const html = await draftHtml(app);

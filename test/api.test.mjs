@@ -72,6 +72,42 @@ fake.restore();
   fake.restore();
 }
 
+// Terms record: append-only, one per team, needs somewhere to store it, verified when PINs are on
+{
+  const { createFileKV } = await import('../src/file-kv.js');
+  const kvFile = new URL('../.cache/accept-test.json', import.meta.url).pathname;
+  const { rmSync } = await import('node:fs');
+  rmSync(kvFile, { force: true });
+  const BOARD = createFileKV(kvFile);
+  const post = async (body, env, headers = {}) => {
+    const res = await handleApi(new Request('http://local/api/accept', { method: 'POST', headers: { 'user-agent': 'test-agent', ...headers }, body: JSON.stringify(body) }), { LEAGUE_ID: '424242', SEASON: '2027', REFRESH_SECONDS: '0', BOARD, ...env }, ctx);
+    return { res, body: await res.json() };
+  };
+  const read = async (env) => (await get('/api/accept', { BOARD, ...env })).body;
+  assert.equal((await post({ teamId: 1, version: 1 }, { BOARD: undefined })).res.status, 503, 'no storage, no record');
+  assert.equal((await post({ version: 1 }, {})).res.status, 400, 'a team is required');
+  assert.equal((await post({ teamId: 1, version: 99 }, {})).res.status, 409, 'wrong terms version');
+  const first = await post({ teamId: 1, version: 1 }, {});
+  assert.equal(first.res.status, 200);
+  assert.equal(first.body.verified, false, 'without PINs the record is marked unverified');
+  assert.equal(first.body.agent, 'test-agent');
+  await new Promise((r) => setTimeout(r, 15));
+  const again = await post({ teamId: 1, version: 1 }, {});
+  assert.equal(again.body.at, first.body.at, 'accepting again keeps the original time');
+  assert.equal((await read({})).accepted[1].at, first.body.at);
+  assert.equal((await handleApi(new Request('http://local/api/accept', { method: 'DELETE' }), { LEAGUE_ID: '424242', BOARD }, ctx)).status, 405, 'there is no way to remove a record');
+  // With PINs: only the signed-in team, and the record is verified
+  const pinEnv = { TEAM_PINS: '2=193846', SESSION_SECRET: 's' };
+  assert.equal((await post({ teamId: 2, version: 1 }, pinEnv)).res.status, 401, 'PINs on: signing in is required');
+  const login = await handleApi(new Request('http://local/api/login', { method: 'POST', body: JSON.stringify({ teamId: 2, pin: '193846' }) }), { LEAGUE_ID: '424242', SEASON: '2027', ...pinEnv }, ctx);
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  const signed = await post({ teamId: 5, version: 1 }, pinEnv, { cookie });
+  assert.equal(signed.body.teamId, 2, 'the signed-in team is recorded, whatever the request says');
+  assert.equal(signed.body.verified, true);
+  assert.deepEqual(Object.keys((await read({})).accepted).sort(), ['1', '2']);
+  rmSync(kvFile, { force: true });
+}
+
 // Config never leaks cookie values
 {
   fake = installFakeEspn();

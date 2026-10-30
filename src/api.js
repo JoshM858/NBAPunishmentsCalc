@@ -59,7 +59,8 @@ async function handle(request, env, ctx, state) {
   const url = new URL(request.url);
   const signIn = url.pathname === '/api/login' || url.pathname === '/api/logout';
   const board = url.pathname === '/api/board';
-  const allowed = signIn ? ['POST'] : board ? ['GET', 'POST'] : ['GET'];
+  const accept = url.pathname === '/api/accept';
+  const allowed = signIn ? ['POST'] : board || accept ? ['GET', 'POST'] : ['GET'];
   if (!allowed.includes(request.method)) return json({ error: signIn ? 'Use POST to sign in.' : 'Only GET is supported.' }, 405);
   const season = Number(env.SEASON) || defaultSeason();
   const leagueId = String(env.LEAGUE_ID || '').trim();
@@ -92,6 +93,8 @@ async function handle(request, env, ctx, state) {
     }
 
     // The trade block: each team's block, targets, untouchables and notes, readable by everyone, editable by that team
+    // The terms record: who accepted the Terms and Conditions (and the punishment pact) and when. Append-only.
+    if (accept) return request.method === 'POST' ? await saveAcceptance(request, env, leagueId) : await readAcceptances(env, leagueId);
     if (board) return request.method === 'POST' ? await saveBoard(request, env, leagueId) : await readBoard(request, env, leagueId);
 
     // Team PINs: optional, and only a speed bump among friends (see README). Set TEAM_PINS="1=482913,2=193846".
@@ -382,6 +385,52 @@ async function saveBoard(request, env, leagueId) {
   };
   await env.BOARD.put(boardKey(leagueId, teamId), JSON.stringify(record));
   return json(record);
+}
+
+/* ---------- Terms record ---------- */
+
+export const TERMS_VERSION = 1; // raise when the terms change: everyone is asked to accept again
+const acceptKey = (leagueId, teamId) => `accept:${leagueId}:${teamId}`;
+
+async function readAcceptances(env, leagueId) {
+  const out = { enabled: Boolean(env.BOARD), version: TERMS_VERSION, accepted: {} };
+  if (!env.BOARD || !leagueId) return json(out);
+  const listed = await env.BOARD.list({ prefix: `accept:${leagueId}:` });
+  await Promise.all((listed.keys || []).map(async ({ name }) => {
+    const raw = await env.BOARD.get(name);
+    if (raw) out.accepted[name.split(':').pop()] = JSON.parse(raw);
+  }));
+  return json(out);
+}
+
+// Accepting is recorded once per team and version and can never be removed through the site, so nobody can back out.
+// With PINs on the record is verified (the signed-in team); without PINs it is stored but marked unverified.
+async function saveAcceptance(request, env, leagueId) {
+  if (!env.BOARD) return json({ error: 'There is nowhere to store the record on this site yet (see README, Trade block).' }, 503);
+  if (!leagueId) return json({ error: 'LEAGUE_ID is not set.' }, 500);
+  let body = {};
+  try {
+    body = JSON.parse((await request.text()).slice(0, 2048));
+  } catch {
+    return json({ error: 'That did not look right. Try again.' }, 400);
+  }
+  const verified = pinsOf(env).size > 0;
+  const teamId = verified ? await teamFromCookie(request, env) : Number(body.teamId);
+  if (!Number.isInteger(teamId) || teamId <= 0) return json({ error: verified ? 'Sign in with your team PIN first.' : 'Say which team you are.' }, verified ? 401 : 400);
+  if (Number(body.version) !== TERMS_VERSION) return json({ error: 'The terms have changed. Reload the page and read them again.' }, 409);
+  const key = acceptKey(leagueId, teamId);
+  const old = await env.BOARD.get(key);
+  if (old && JSON.parse(old).version === TERMS_VERSION) return json(JSON.parse(old)); // already on record: keep the original time
+  const record = { teamId, version: TERMS_VERSION, at: Date.now(), verified, agent: String(request.headers.get('user-agent') || '').slice(0, 120), network: await shortHash(request.headers.get('cf-connecting-ip') || request.headers.get('x-real-ip') || '') };
+  await env.BOARD.put(key, JSON.stringify(record));
+  return json(record);
+}
+
+// A short fingerprint of the network address (not the address itself), as supporting evidence on the record
+async function shortHash(text) {
+  if (!text) return null;
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`np:${text}`));
+  return [...new Uint8Array(digest).slice(0, 4)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 /* ---------- Team PINs ---------- */

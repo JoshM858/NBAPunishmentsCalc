@@ -4,7 +4,7 @@ import { loadLeague, loadSeasonDays } from './pipeline.js';
 import { createAccount } from './account.js';
 import { createPlayerStore } from './players-store.js';
 import { openThemeChooser, startTheme } from './ui/theme-ui.js';
-import { agreedOn, hasAgreed, openAgreement } from './ui/agree.js';
+import { agreedOn, isAccepted, openAgreement } from './ui/agree.js';
 import { openLegal } from './ui/legal.js';
 import { tradeContext } from './trade.js';
 import { createTradeUI } from './trade-ui.js';
@@ -398,4 +398,12 @@ if ('serviceWorker' in navigator && !DEMO && location.protocol !== 'file:') navi
 const firstVisit = startTheme();
 $('colours').addEventListener('click', () => openThemeChooser());
 const afterAgree = () => firstVisit && openThemeChooser({ firstRun: true });
-load().finally(() => (hasAgreed() ? afterAgree() : openAgreement({ onDone: () => { show(); afterAgree(); } })));
+// Everyone must be on the Terms record (their team, with the time) before using the site; signing in as a team that has
+// not accepted asks again
+async function gate() {
+  if (!app.ctx || await isAccepted(app)) return false;
+  openAgreement(app, { onDone: () => { show(); afterAgree(); } });
+  return true;
+}
+app.account.onChange(() => gate());
+load().finally(async () => { if (!(await gate())) afterAgree(); });
