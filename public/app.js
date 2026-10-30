@@ -4,6 +4,7 @@ import { loadLeague, loadSeasonDays } from './pipeline.js';
 import { createAccount } from './account.js';
 import { createPlayerStore } from './players-store.js';
 import { openThemeChooser, startTheme } from './ui/theme-ui.js';
+import { agreedOn, hasAgreed, openAgreement } from './ui/agree.js';
 import { tradeContext } from './trade.js';
 import { createTradeUI } from './trade-ui.js';
 import { createApiSource, createSnapshotSource, checkSnapshot, fetchScoreboard } from './sources.js';
@@ -269,7 +270,7 @@ function renderFoot(m) {
       ? `<p class="warn">${plural(bad.length, 'team')} don’t match ESPN’s season total: ${bad.map((b) => `${esc(b.name)} (ESPN ${fmt(b.espn)}, rebuilt ${fmt(b.ours)})`).join('; ')}. Try <a href="?source=roster">roster mode</a>.</p>`
       : `<p class="ok">Every team’s rebuilt total matches ESPN’s season total${app.check.every((c) => c.basis === 'finished days') ? ' (ESPN counts finished days only, so today isn’t in it)' : ''}.</p>`;
   }
-  return `<p>Weekly points are rebuilt from ${how}, so they start at 0 each week no matter what ESPN’s season total says. Dates are US game days. ${weeks} ${refresh}</p>${check} <button type="button" class="link" data-open="colours">Change colours</button>`;
+  return `<p>Weekly points are rebuilt from ${how}, so they start at 0 each week no matter what ESPN’s season total says. Dates are US game days. ${weeks} ${refresh}</p>${check} <button type="button" class="link" data-open="colours">Change colours</button>${agreedOn() ? ` <span class="muted">Punishment pact accepted ${agreedOn()}.</span>` : ''}`;
 }
 
 const SETUP = {
@@ -393,4 +394,5 @@ onRoute((route) => {
 if ('serviceWorker' in navigator && !DEMO && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {}); // lets the site install as an app
 const firstVisit = startTheme();
 $('colours').addEventListener('click', () => openThemeChooser());
-load().finally(() => firstVisit && openThemeChooser({ firstRun: true }));
+const afterAgree = () => firstVisit && openThemeChooser({ firstRun: true });
+load().finally(() => (hasAgreed() ? afterAgree() : openAgreement({ onDone: () => { show(); afterAgree(); } })));
