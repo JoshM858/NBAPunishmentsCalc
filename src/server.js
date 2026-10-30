@@ -5,6 +5,7 @@ import { extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { handleApi } from './api.js';
 import { loadEnv } from './env.js';
+import { createFileKV } from './file-kv.js';
 
 const PUBLIC = fileURLToPath(new URL('../public/', import.meta.url));
 const TYPES = {
@@ -18,7 +19,7 @@ const TYPES = {
 };
 
 const { env: loaded, hasFile } = loadEnv();
-const env = { ...loaded, PLATFORM: 'local' };
+const env = { ...loaded, PLATFORM: 'local', BOARD: createFileKV(fileURLToPath(new URL('../.data/board.json', import.meta.url))) }; // the trade block is kept in .data/
 const port = Number(env.PORT) || 8787;
 const host = env.HOST || '127.0.0.1'; // localhost only, so nobody else on the network can use your cookies
 

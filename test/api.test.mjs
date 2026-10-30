@@ -276,6 +276,100 @@ for (const [mode, status, pattern] of [
   assert.match(r.headers.get('set-cookie'), /Max-Age=0/);
 }
 
+// Trade block: shared lists, editable only by the signed-in team
+{
+  const mem = () => {
+    const m = new Map();
+    return { m, get: async (k) => (m.has(k) ? m.get(k) : null), put: async (k, v) => void m.set(k, String(v)), list: async ({ prefix = '' } = {}) => ({ keys: [...m.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })) }) };
+  };
+  const store = mem();
+  const pins = { TEAM_PINS: '1=482913,2=193846', SESSION_SECRET: 'board-secret' };
+  const env = (extra = {}) => ({ LEAGUE_ID: '555', SEASON: '2027', REFRESH_SECONDS: '0', BOARD: store, ...pins, ...extra });
+  const send = (path, { method = 'GET', body, cookie, e = env(), ip = '9.9.9.9' } = {}) =>
+    handleApi(new Request(`http://board.test${path}`, { method, body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body), headers: { 'x-real-ip': ip, ...(cookie ? { cookie } : {}) } }), e, ctx);
+  const login = async (id, pin) => (await send('/api/login', { method: 'POST', body: { teamId: id, pin } })).headers.get('set-cookie').split(';')[0];
+  const c1 = await login(1, '482913');
+  const c2 = await login(2, '193846');
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // reading: open to everyone, even signed out; says who can edit
+  let r = await (await send('/api/board')).json();
+  assert.deepEqual([r.enabled, r.canEdit, r.teamId, r.teams], [true, false, null, {}]);
+  assert.deepEqual(r.limits, { block: 10, targets: 10, untouchables: 3, positions: 5, note: 140 });
+  r = await (await send('/api/board', { cookie: c1 })).json();
+  assert.deepEqual([r.canEdit, r.teamId], [true, 1]);
+
+  // writing needs a signed-in team
+  let w = await send('/api/board', { method: 'POST', body: { block: [1] } });
+  assert.equal(w.status, 401);
+  assert.match((await w.json()).error, /Sign in with your team PIN/);
+  assert.equal((await send('/api/board', { method: 'POST', body: { block: [1] }, cookie: 'pw_team=1.9999999999.forged' })).status, 401);
+
+  // a team saves its own lists, tidied
+  w = await send('/api/board', { method: 'POST', cookie: c1, body: { teamId: 2, block: [10, 11, 11, '12', 'x', -3, 4.5, 99], untouchables: [99, 98, 97, 96], targets: [20, 21], positions: ['PG', 'C', 'XX', 'PG'], note: '  Need a big\n man <b>please</b>  ' } });
+  assert.equal(w.status, 200);
+  let saved = await w.json();
+  assert.equal(saved.teamId, 1, 'the team comes from the sign-in, not from what was sent');
+  assert.deepEqual(saved.untouchables, [99, 98, 97], 'at most three untouchables');
+  assert.deepEqual(saved.block, [10, 11, 12], 'whole numbers only, no repeats, and no untouchable also on the block');
+  assert.deepEqual(saved.targets, [20, 21]);
+  assert.deepEqual(saved.positions, ['PG', 'C']);
+  assert.equal(saved.note, 'Need a big man <b>please</b>', 'control characters removed (the page escapes the rest)');
+  assert.ok(Date.now() - saved.updatedAt < 5000);
+  assert.deepEqual(JSON.parse(store.m.get('board:555:1')), saved, 'stored under the league and team');
+  assert.equal(store.m.has('board:555:2'), false, 'nothing was written for the team named in the request body');
+
+  // limits
+  w = await send('/api/board', { method: 'POST', cookie: c2, body: { block: Array.from({ length: 30 }, (_, i) => i + 1), targets: Array.from({ length: 30 }, (_, i) => i + 1), note: 'x'.repeat(500) } });
+  saved = await w.json();
+  assert.deepEqual([saved.block.length, saved.targets.length, saved.note.length], [10, 10, 140]);
+  assert.equal((await send('/api/board', { method: 'POST', cookie: c2, body: 'x'.repeat(5000) })).status, 413);
+  await wait(1100);
+  assert.equal((await send('/api/board', { method: 'POST', cookie: c2, body: '{not json' })).status, 400);
+
+  // everyone sees everyone's lists; teams cannot overwrite each other
+  r = await (await send('/api/board')).json();
+  assert.deepEqual(Object.keys(r.teams).sort(), ['1', '2']);
+  assert.deepEqual(r.teams[1].block, [10, 11, 12]);
+  assert.equal(r.teams[2].block.length, 10);
+  await wait(1100);
+  await send('/api/board', { method: 'POST', cookie: c2, body: { block: [7] } });
+  r = await (await send('/api/board')).json();
+  assert.deepEqual(r.teams[1].block, [10, 11, 12], 'team 2 saving did not touch team 1');
+  assert.deepEqual(r.teams[2].block, [7]);
+
+  // saves are limited to one a second per team
+  w = await send('/api/board', { method: 'POST', cookie: c2, body: { block: [8] } });
+  assert.equal(w.status, 429);
+  assert.match((await w.json()).error, /Slow down/);
+
+  // another league's lists never mix in
+  r = await (await send('/api/board', { e: env({ LEAGUE_ID: '556' }) })).json();
+  assert.deepEqual(r.teams, {});
+
+  // not switched on: readable but empty, and saving explains why
+  r = await (await send('/api/board', { e: env({ BOARD: undefined }) })).json();
+  assert.deepEqual([r.enabled, r.canEdit, r.teams], [false, false, {}]);
+  w = await send('/api/board', { method: 'POST', cookie: c1, body: { block: [1] }, e: env({ BOARD: undefined }) });
+  assert.equal(w.status, 503);
+  assert.match((await w.json()).error, /needs somewhere to store/);
+
+  // no PINs on a hosted site: nobody can edit (anyone could pose as anyone)
+  w = await send('/api/board', { method: 'POST', body: { teamId: 1, block: [1] }, e: env({ TEAM_PINS: undefined }) });
+  assert.equal(w.status, 403);
+  assert.match((await w.json()).error, /Turn on team PINs/);
+  assert.equal((await (await send('/api/board', { e: env({ TEAM_PINS: undefined }) })).json()).canEdit, false);
+  // on the PC version without PINs, the team is named in the request
+  w = await send('/api/board', { method: 'POST', body: { teamId: 6, block: [5] }, e: env({ TEAM_PINS: undefined, PLATFORM: 'local' }) });
+  assert.equal(w.status, 200);
+  assert.equal((await w.json()).teamId, 6);
+  assert.equal((await send('/api/board', { method: 'POST', body: { block: [5] }, e: env({ TEAM_PINS: undefined, PLATFORM: 'local', REFRESH_SECONDS: '0' }), ip: '1.1.1.1' })).status, 403, 'and it must say which team');
+
+  // methods
+  assert.equal((await send('/api/board', { method: 'DELETE' })).status, 405);
+  assert.equal((await send('/api/board', { method: 'PUT', body: {} })).status, 405);
+}
+
 // Refresh limit: once every 5 seconds per signed-in team, or per device. Over the limit is not an error.
 {
   const pins = { TEAM_PINS: '1=482913,2=193846', SESSION_SECRET: 'rl-secret' };

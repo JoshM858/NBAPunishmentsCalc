@@ -112,7 +112,7 @@ export function parseProSchedule(raw) {
       if (!list?.length) continue;
       const g = list[0];
       const sp = Number(key);
-      bySP.set(sp, { date: num(g.date), opp: g.homeProTeamId === t.id ? g.awayProTeamId : g.homeProTeamId });
+      bySP.set(sp, { date: num(g.date), opp: g.homeProTeamId === t.id ? g.awayProTeamId : g.homeProTeamId, home: g.homeProTeamId === t.id });
       if (!spDate.has(sp) || g.date < spDate.get(sp)) spDate.set(sp, num(g.date));
       if (!spLast.has(sp) || g.date > spLast.get(sp)) spLast.set(sp, num(g.date));
       if (g.homeProTeamId === t.id) spSlate.set(sp, [...(spSlate.get(sp) || []), num(g.date)]); // count each game once, from the home side

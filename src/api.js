@@ -56,7 +56,9 @@ export async function handleApi(request, env, ctx) {
 async function handle(request, env, ctx, state) {
   const url = new URL(request.url);
   const signIn = url.pathname === '/api/login' || url.pathname === '/api/logout';
-  if (request.method !== (signIn ? 'POST' : 'GET')) return json({ error: signIn ? 'Use POST to sign in.' : 'Only GET is supported.' }, 405);
+  const board = url.pathname === '/api/board';
+  const allowed = signIn ? ['POST'] : board ? ['GET', 'POST'] : ['GET'];
+  if (!allowed.includes(request.method)) return json({ error: signIn ? 'Use POST to sign in.' : 'Only GET is supported.' }, 405);
   const season = Number(env.SEASON) || defaultSeason();
   const leagueId = String(env.LEAGUE_ID || '').trim();
   const cookie = cookieHeader(env);
@@ -86,6 +88,9 @@ async function handle(request, env, ctx, state) {
         hideTeams: String(env.HIDE_TEAMS || '').split(',').map((s) => s.trim()).filter(Boolean),
       });
     }
+
+    // The trade block: each team's block, targets, untouchables and notes, readable by everyone, editable by that team
+    if (board) return request.method === 'POST' ? await saveBoard(request, env, leagueId) : await readBoard(request, env, leagueId);
 
     // Team PINs: optional, and only a speed bump among friends (see README). Set TEAM_PINS="1=482913,2=193846".
     if (url.pathname === '/api/me') return json({ pins: pinsOf(env).size > 0, teamId: await teamFromCookie(request, env) });
@@ -271,6 +276,65 @@ async function refreshLimited(request, env, route, seconds) {
   if (await cache.match(key).catch(() => null)) return true;
   await cache.put(key, new Response('1', { headers: { 'cache-control': `public, max-age=${Math.max(1, Math.ceil(seconds))}` } })).catch(() => {});
   return false;
+}
+
+/* ---------- Trade block ---------- */
+
+const BOARD_LIMITS = { block: 10, targets: 10, untouchables: 3, positions: 5, note: 140 };
+const POSITIONS = ['PG', 'SG', 'SF', 'PF', 'C'];
+const boardKey = (leagueId, teamId) => `board:${leagueId}:${teamId}`;
+
+// Who may edit: the signed-in team when PINs are on; on the PC version (nobody else can reach it) any team.
+async function boardEditor(request, env, body) {
+  if (pinsOf(env).size) return { teamId: await teamFromCookie(request, env), why: 'Sign in with your team PIN to edit your trade block.' };
+  if (env.PLATFORM === 'local') {
+    const id = Number(body?.teamId);
+    return { teamId: Number.isInteger(id) && id > 0 ? id : null, why: 'Say which team this is for.' };
+  }
+  return { teamId: null, why: 'Turn on team PINs (TEAM_PINS) so each manager can edit only their own trade block.' };
+}
+
+async function readBoard(request, env, leagueId) {
+  const editor = await boardEditor(request, env, null);
+  const base = { enabled: Boolean(env.BOARD), canEdit: Boolean(env.BOARD) && (editor.teamId != null || env.PLATFORM === 'local'), teamId: editor.teamId, limits: BOARD_LIMITS, teams: {} };
+  if (!env.BOARD || !leagueId) return json(base);
+  const listed = await env.BOARD.list({ prefix: `board:${leagueId}:` });
+  await Promise.all((listed.keys || []).map(async ({ name }) => {
+    const raw = await env.BOARD.get(name);
+    if (raw) base.teams[name.split(':').pop()] = JSON.parse(raw);
+  }));
+  return json(base);
+}
+
+// Whole numbers only, no repeats, capped
+const ids = (list, max) => [...new Set((Array.isArray(list) ? list : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, max);
+
+async function saveBoard(request, env, leagueId) {
+  if (!env.BOARD) return json({ error: 'The trade block needs somewhere to store its lists, and that is not switched on for this site yet. See the README (Trade block).' }, 503);
+  if (!leagueId) return json({ error: 'LEAGUE_ID is not set.' }, 500);
+  const text = await request.text();
+  if (text.length > 4096) return json({ error: 'That is too much to save.' }, 413);
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return json({ error: 'That did not look right. Try again.' }, 400);
+  }
+  const { teamId, why } = await boardEditor(request, env, body);
+  if (teamId == null) return json({ error: why }, pinsOf(env).size ? 401 : 403);
+  if (await refreshLimited(request, env, 'board-save', 1)) return json({ error: 'Slow down: one save a second.' }, 429);
+  const untouchables = ids(body.untouchables, BOARD_LIMITS.untouchables);
+  const record = {
+    teamId,
+    untouchables,
+    block: ids(body.block, BOARD_LIMITS.block).filter((id) => !untouchables.includes(id)), // not both
+    targets: ids(body.targets, BOARD_LIMITS.targets),
+    positions: [...new Set((Array.isArray(body.positions) ? body.positions : []).filter((p) => POSITIONS.includes(p)))].slice(0, BOARD_LIMITS.positions),
+    note: String(body.note ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, BOARD_LIMITS.note),
+    updatedAt: Date.now(),
+  };
+  await env.BOARD.put(boardKey(leagueId, teamId), JSON.stringify(record));
+  return json(record);
 }
 
 /* ---------- Team PINs ---------- */
