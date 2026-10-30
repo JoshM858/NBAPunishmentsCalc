@@ -33,6 +33,7 @@ const app = {
   board: null,
   check: null,
   seasonLoaded: false,
+  seasonLoading: null,
   tz: 'Australia/Melbourne',
   route: parseHash(),
   limited: false,

@@ -1,6 +1,8 @@
 // Dashboard: who is on track for the punishment, how sure we are, game-day times and the week at a glance.
 import { bankedShare, confidence, oshit } from '../meters.js';
-import { esc, fmt, moveBadge, names, panel, pct, plural } from '../ui/dom.js';
+import { form } from '../players-data.js';
+import { esc, fmt, fmt1, moveBadge, names, panel, pct, plural, signed } from '../ui/dom.js';
+import { headshot, statusChip } from '../ui/player.js';
 import { gameDayHtml } from '../ui/gameday.js';
 import { link } from '../ui/router.js';
 
@@ -62,12 +64,34 @@ function boardHtml(m, app) {
       <tbody>${rows}</tbody></table></div>`, { cls: 'flush', tools: `<a class="btn sm" href="${link('matchups')}">Matchups</a>` });
 }
 
+// A short list of players for a side panel
+const miniList = (title, rows, href, line) =>
+  panel(title, rows.length ? `<ul class="mini">${rows.map((p) => `<li><a href="${link('players', p.id)}">${headshot(p.id)}<span><b>${esc(p.name)}</b><small>${esc(p.team)} · ${esc(p.pos.join('/'))}${p.fantasyTeam ? ` · ${esc(p.fantasyTeam.name)}` : ''}</small></span></a><em>${line(p)}</em></li>`).join('')}</ul>` : '<p class="empty">Nothing to show yet.</p>', { cls: 'flush', tools: `<a class="btn sm" href="${href}">All</a>` });
+
+function sideHtml(state) {
+  const pool = state.players.filter((p) => p.proTeamId);
+  const best = pool.filter((p) => p.free && p.rank && p.injury === 'ACTIVE').sort((a, b) => a.rank - b.rank).slice(0, 5);
+  const hot = pool.filter((p) => p.gp >= 3 && p.own >= 20 && form(p) != null).sort((a, b) => form(b) - form(a)).slice(0, 5);
+  const hurt = pool.filter((p) => !p.free && p.injury !== 'ACTIVE').sort((a, b) => b.avg - a.avg).slice(0, 6);
+  return [
+    miniList('Best available', best, link('players', 'free'), (p) => `${fmt1(p.avg)} <small>avg</small>`),
+    miniList('Hot right now', hot, link('players'), (p) => `<span class="pos-text">${signed(form(p), 0)}%</span>`),
+    miniList('Injury report', hurt, link('players'), (p) => statusChip(p)),
+  ].join('');
+}
+
 export default {
   id: 'dashboard',
   label: 'Dashboard',
-  render(app, el) {
+  async render(app, el, route) {
     const m = app.model;
     const day = gameDayHtml(app);
-    el.innerHTML = `${heroHtml(m)}${day ? `<div class="grid main-side">${boardHtml(m, app)}${day}</div>` : boardHtml(m, app)}`;
+    const draw = (side) => {
+      el.innerHTML = `${heroHtml(m)}<div class="grid main-side"><div class="grid">${boardHtml(m, app)}</div><div class="grid">${day}${side}</div></div>`;
+    };
+    draw('');
+    // Player panels come from the pool, which loads a moment later; the page is usable without them
+    const state = await app.store.get().catch(() => null);
+    if (state?.players.length && app.route === route) draw(sideHtml(state));
   },
 };

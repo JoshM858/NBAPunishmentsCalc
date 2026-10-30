@@ -38,6 +38,8 @@ export function createApiSource(get) {
       await Promise.all(Array.from({ length: 6 }, worker));
       return out;
     },
+    draft: () => get('api/league?view=mDraftDetail&view=mSettings&past=1'),
+    activity: () => get('api/league?view=mTransactions2'),
     league(views, { sp, fresh, past } = {}) {
       const q = new URLSearchParams();
       for (const v of views) q.append('view', v);
@@ -78,6 +80,8 @@ export function createSnapshotSource(snap) {
     players: async () => snap.players || [],
     player: async (id) => (snap.players || []).find((p) => p.id === Number(id)) ?? null,
     bios: async () => new Map(Object.entries(snap.bios || {}).map(([id, b]) => [Number(id), b])),
+    draft: async () => snap.draft || null,
+    activity: async () => snap.activity || null,
     league: async (views, { sp } = {}) => {
       if (!sp) return snap.league;
       const day = snap.days?.[sp];

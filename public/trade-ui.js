@@ -76,7 +76,10 @@ export function createTradeUI({ data, account }) {
         const chip = status ? `<span class="inj" title="${esc(full)}">${esc(status)}${back ? `<span class="when"> ${shortDate(back)}</span>` : ''}</span>` : '';
         const pick = st.picks.get(p.playerId);
         const tip = `${p.name}: ${v.ppg.toFixed(1)} points a game when he plays, plays about ${Math.round(v.rate * 100)}% of games${full ? `; ${full}` : ''}`;
-        const body = `<span class="pn">${esc(p.name)}</span>${chip}<span class="pv">${v.ppg.toFixed(1)}<small class="pct"> ×${Math.round(v.rate * 100)}%</small></span>`;
+        const acts = pickable && team.id !== account.team()?.id
+          ? `<span class="pacts"><button type="button" class="mini-btn" data-t="ideas" data-id="${p.playerId}" title="Trade ideas for ${esc(p.name)}">Ideas</button><button type="button" class="mini-btn" data-t="proj" data-id="${p.playerId}" title="${esc(p.name)}’s projection">Proj</button></span>`
+          : '';
+        const body = `<span class="pn">${esc(p.name)}</span>${chip}<span class="pv">${v.ppg.toFixed(1)}<small class="pct"> ×${Math.round(v.rate * 100)}%</small></span>${acts}`;
         if (!pickable) return `<li class="prow" title="${esc(tip)}"><div class="pl static">${body}</div></li>`;
         const dest = pick && n > 2
           ? `<label class="dest">→ <select data-t="dest" data-id="${p.playerId}" aria-label="Where ${esc(p.name)} goes">${st.order.filter((id) => id !== team.id).map((id) => `<option value="${id}"${pick.to === id ? ' selected' : ''}>${esc(teamOf(id).name)}</option>`).join('')}</select></label>`
@@ -226,6 +229,18 @@ export function createTradeUI({ data, account }) {
     return { line, sheet, summary, notes: lines.filter((l) => /warn|note/.test(l)).length };
   }
 
+  // The "trade items" strip: what each team sends, in four slots a side, with the points-a-game each side sends
+  function slotsHtml(me, teams, ctx) {
+    const sends = teams.map((t) => {
+      const items = [...st.picks].filter(([, m]) => m.from === t.id).map(([pid]) => t.roster.find((p) => p.playerId === pid)).filter(Boolean);
+      return { t, items, total: items.reduce((s, p) => s + ctx.valueOf(p).ppg, 0) };
+    });
+    const slot = (t, p) => (p
+      ? `<span class="slot filled"><span class="sn">${esc(p.name)}</span><span class="sv">${ctx.valueOf(p).ppg.toFixed(1)}</span><button type="button" class="link" data-t="untick" data-id="${p.playerId}" aria-label="Remove ${esc(p.name)}">✕</button></span>`
+      : `<button type="button" class="slot" data-t="slotadd" data-team="${t.id}">Add trade item</button>`);
+    return `<div class="tslots">${sends.map(({ t, items, total }) => `<div class="tside"><p class="tside-h"><b>${t.id === me.id ? 'You send' : `${esc(t.name)} sends`}</b><span>${items.length ? `${total.toFixed(1)} pts/game` : ''}</span></p><div class="tside-slots">${Array.from({ length: Math.max(3, items.length) }, (_, i) => slot(t, items[i])).join('')}</div></div>`).join('')}</div>`;
+  }
+
   function builderView(me) {
     const ctx = ctxOf();
     const teams = st.order.map(teamOf).filter(Boolean);
@@ -249,7 +264,7 @@ export function createTradeUI({ data, account }) {
           : n === 2
             ? `<h3><select data-t="partner" aria-label="Team to trade with">${partnerChoices.map((o) => `<option value="${o.id}"${o.id === t.id ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}</select></h3>`
             : `<h3>${esc(t.name)} <button type="button" class="link" data-t="remove" data-id="${t.id}">Remove</button></h3>`;
-        return `<section class="tcol${i === 0 ? ' mine' : ''}">${head}${rosterList(t, ctx, { pickable: true })}</section>`;
+        return `<section class="tcol${i === 0 ? ' mine' : ''}" data-team="${t.id}">${head}${rosterList(t, ctx, { pickable: true })}</section>`;
       })
       .join('');
     panel.innerHTML = `<div class="fit build">
@@ -262,6 +277,7 @@ export function createTradeUI({ data, account }) {
           ${st.sim && valid ? `<button type="button" class="action ghost" data-t="odds" aria-expanded="${st.sheet === 'sim'}">Odds ${st.sheet === 'sim' ? '▴' : '▾'}</button>` : ''}
           ${result.sheet ? `<button type="button" class="action ghost" data-t="sheet" aria-expanded="${st.sheet === 'details'}">Why &amp; details${result.notes ? ` (${result.notes})` : ''} ${st.sheet === 'details' ? '▴' : '▾'}</button>` : ''}
         </div>
+        ${slotsHtml(me, teams, ctx)}
         <div class="vline" aria-live="polite">${result.line}</div>
         ${simLine}
       </div>
@@ -315,7 +331,17 @@ export function createTradeUI({ data, account }) {
     if (!btn || !data().ctx) return;
     const act = btn.dataset.t;
     const id = Number(btn.dataset.id);
-    if (act === 'signout') account.signOut();
+    if (act === 'ideas') {
+      location.hash = `#/transactions/finder?want=${id}`;
+    } else if (act === 'proj') {
+      location.hash = `#/players/${id}`;
+    } else if (act === 'slotadd') {
+      panel.querySelector(`.tcol[data-team="${btn.dataset.team}"] input[type=checkbox]:not(:checked)`)?.focus();
+    } else if (act === 'untick') {
+      st.picks.delete(id);
+      st.sheet = null;
+      redraw();
+    } else if (act === 'signout') account.signOut();
     else if (act === 'open') {
       st.order = [account.team().id, id];
       st.picks.clear();
@@ -392,5 +418,18 @@ export function createTradeUI({ data, account }) {
     setTimeout(() => (btn.textContent = before), 1800);
   }
 
-  return { panel, render, reset, prefetch, state: st };
+  // Start a trade with a team, optionally with players already ticked (`give` from my team, `get` from theirs)
+  function open(partnerId, { give = [], get = [] } = {}) {
+    const me = account.team();
+    if (!me || !teamOf(partnerId) || partnerId === me.id) return false;
+    startOver();
+    st.order = [me.id, partnerId];
+    st.view = 'build';
+    for (const id of give) if (me.roster.some((p) => p.playerId === id)) st.picks.set(id, { from: me.id, to: partnerId });
+    for (const id of get) if (teamOf(partnerId).roster.some((p) => p.playerId === id)) st.picks.set(id, { from: partnerId, to: me.id });
+    if (panel.isConnected) render();
+    return true;
+  }
+
+  return { panel, render, reset, prefetch, open, state: st };
 }

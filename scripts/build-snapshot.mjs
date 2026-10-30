@@ -74,6 +74,8 @@ try {
   // The player pool and bios feed the Players pages. Optional too: without them those pages say so.
   const players = await src.players().catch((err) => (console.log(`Warning: no player pool in the snapshot (${err.message})`), []));
   const abbrevs = [...new Set([...ctx.pro.abbrev.values()].filter((a) => a && a !== 'FA'))];
+  const draftRaw = await src.draft().catch(() => null);
+  const activityRaw = await src.activity().catch(() => null);
   const bioMap = players.length && src.bios ? await src.bios(abbrevs) : new Map();
   const bios = {};
   for (const pl of players) {
@@ -103,6 +105,8 @@ try {
     freeAgents,
     players,
     bios,
+    activity: activityRaw?.transactions ? { transactions: activityRaw.transactions.filter((t) => ['FREEAGENT', 'WAIVER'].includes(t.type) || t.type.startsWith('TRADE')).map((t) => ({ id: t.id, type: t.type, status: t.status, teamId: t.teamId, proposedDate: t.proposedDate, items: (t.items || []).map((i) => ({ type: i.type, playerId: i.playerId, fromTeamId: i.fromTeamId, toTeamId: i.toTeamId })) })).filter((t) => visible.has(t.teamId)) } : null,
+    draft: draftRaw?.draftDetail ? { draftDetail: { ...draftRaw.draftDetail, picks: draftRaw.draftDetail.picks.filter((p) => visible.has(p.teamId)).map((p) => ({ overallPickNumber: p.overallPickNumber, roundId: p.roundId, roundPickNumber: p.roundPickNumber, teamId: p.teamId, playerId: p.playerId, keeper: p.keeper })) }, settings: { draftSettings: { type: draftRaw.settings?.draftSettings?.type, pickOrder: (draftRaw.settings?.draftSettings?.pickOrder || []).filter((id) => visible.has(id)) } } } : null,
     injuries: injuriesRaw,
     days,
     history,
