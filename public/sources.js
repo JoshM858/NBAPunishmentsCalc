@@ -1,14 +1,43 @@
+import { parseLastSeason, parsePool, parseProfile } from './players-data.js';
+
 // Where data comes from: the /api routes (local server or Cloudflare Worker) or a prebuilt snapshot
 // (GitHub Pages). Both give the pipeline the same interface.
 
 // `get(path, { fresh })` returns parsed JSON or throws an Error with a plain-language message.
 export function createApiSource(get) {
+  let config;
+  const cfg = () => (config ||= get('api/config'));
   return {
     kind: 'api',
     config: () => get('api/config'),
     pro: () => get('api/pro-schedule'),
     freeAgents: () => get('api/free-agents').then((b) => b.players),
     injuries: () => get('api/injuries').then((b) => b.players),
+    // Everyone in the player pool as slim records (see players-data.js)
+    players: async () => parsePool(await get('api/players'), (await cfg()).season),
+    // One player with game-by-game box scores, ESPN's outlook text and last season's line
+    player: async (id) => {
+      const raw = await get(`api/player?id=${Number(id)}`);
+      const e = raw.players?.[0];
+      if (!e) return null;
+      const season = (await cfg()).season;
+      return { ...parseProfile(e, season, { outlook: true, box: true }), lastSeason: parseLastSeason(e, season) };
+    },
+    // Age, height and weight from the NBA rosters, one request per team: Map(playerId -> bio)
+    bios: async (abbrevs) => {
+      const out = new Map();
+      let i = 0;
+      const worker = async () => {
+        while (i < abbrevs.length) {
+          const team = abbrevs[i++];
+          try {
+            for (const b of (await get(`api/bios?team=${encodeURIComponent(team.toLowerCase())}`)).players) out.set(b.playerId, b);
+          } catch {} // a missing roster only leaves that team's ages blank
+        }
+      };
+      await Promise.all(Array.from({ length: 6 }, worker));
+      return out;
+    },
     league(views, { sp, fresh, past } = {}) {
       const q = new URLSearchParams();
       for (const v of views) q.append('view', v);
@@ -46,6 +75,9 @@ export function createSnapshotSource(snap) {
     pro: async () => snap.pro,
     freeAgents: async () => snap.freeAgents || [],
     injuries: async () => snap.injuries || [],
+    players: async () => snap.players || [],
+    player: async (id) => (snap.players || []).find((p) => p.id === Number(id)) ?? null,
+    bios: async () => new Map(Object.entries(snap.bios || {}).map(([id, b]) => [Number(id), b])),
     league: async (views, { sp } = {}) => {
       if (!sp) return snap.league;
       const day = snap.days?.[sp];

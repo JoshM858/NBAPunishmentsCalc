@@ -16,9 +16,15 @@ export function installFakeEspn({ mode = 'ok', withSchedule = false, leagueId = 
       const link = [{ rel: ['playercard', 'desktop'], href: 'https://www.espn.com/nba/player/_/id/1001/demo-player' }];
       return new Response(JSON.stringify({ injuries: [{ id: '1', displayName: 'Demo Team', injuries: [{ status: 'Out', shortComment: 'Out without a timetable for a return.', athlete: { links: link }, details: { type: 'Knee', detail: 'Sprain', returnDate: '2026-11-20' } }] }] }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
+    if (String(input).startsWith('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/')) {
+      const abbr = url.pathname.split('/').at(-2);
+      calls.push({ url: url.pathname, cookie: '' });
+      if (abbr === 'zz') return new Response('{}', { status: 404, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({ team: { abbreviation: abbr.toUpperCase() }, athletes: [{ id: '6578', age: 34, displayHeight: "6' 8\"", displayWeight: '225 lbs', experience: { years: 14 }, jersey: '40', dateOfBirth: '1992-05-30T07:00Z', fullName: 'Not Kept' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
     if (!String(input).startsWith(BASE)) return real(input, init);
     const cookie = init.headers?.Cookie || '';
-    calls.push({ url: url.pathname + url.search, cookie });
+    calls.push({ url: url.pathname + url.search, cookie, filter: init.headers?.['x-fantasy-filter'] });
     const reply = (status, body, headers = {}) =>
       new Response(typeof body === 'string' ? body : JSON.stringify(body), { status, headers: { 'content-type': 'application/json;charset=utf-8', ...headers } });
 

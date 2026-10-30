@@ -2,6 +2,8 @@
 import { buildModel, dayInfo, etDateKey, validTimeZone } from './logic.js';
 import { loadLeague, loadSeasonDays } from './pipeline.js';
 import { createAccount } from './account.js';
+import { createPlayerStore } from './players-store.js';
+import { tradeContext } from './trade.js';
 import { createTradeUI } from './trade-ui.js';
 import { createApiSource, createSnapshotSource, checkSnapshot, fetchScoreboard } from './sources.js';
 import { PAGES } from './pages/index.js';
@@ -44,6 +46,14 @@ const app = {
 };
 const data = () => ({ ctx: app.ctx, src: app.src, now: app.src?.now?.(), dayDone: boardDone() });
 app.account = createAccount({ data });
+app.store = createPlayerStore(data);
+// The trade/projection context (replacement level from the real free-agent list), built once per refresh
+let tctx = null;
+app.tradeContext = () =>
+  (tctx ||= (async () => {
+    const freeAgents = await app.src.freeAgents().catch(() => []);
+    return tradeContext({ league: app.ctx.league, pro: app.ctx.pro, freeAgents, injuries: app.ctx.injuries });
+  })());
 app.trade = createTradeUI({ data, account: app.account });
 app.account.onChange(() => app.ctx && (renderAccount($('account'), app.account.team()), show()));
 
@@ -126,6 +136,8 @@ async function load({ fresh = false } = {}) {
     app.src = src;
     app.ctx = ctx;
     app.trade.reset();
+    app.store.reset();
+    tctx = null;
     await app.account.reset(cfg.pins);
     app.tz = validTimeZone(cfg.timezone) ? cfg.timezone : 'Australia/Melbourne';
     app.model = buildModel({ ...ctx, now: src.now(), dayDone: boardDone() });
@@ -226,7 +238,7 @@ function show() {
   if (page.id !== 'transactions') document.body.classList.remove('trading');
 
   const view = $('view');
-  view.onclick = null;
+  for (const ev of ['onclick', 'oninput', 'onchange', 'ondblclick', 'onkeydown', 'onsubmit']) view[ev] = null; // each page sets its own
   page.render(app, view, route);
   $('foot').innerHTML = renderFoot(m);
   if (!show.lastKey || show.lastKey !== route.path) window.scrollTo(0, 0);
@@ -341,7 +353,7 @@ document.addEventListener('click', async (e) => {
   }
 });
 
-$('account').addEventListener('click', () => (location.hash = link('transactions', 'trade')));
+$('account').addEventListener('click', () => (location.hash = link('team')));
 
 // A snapshot site checks for a new file every few minutes; a live site refreshes hourly.
 const interval = () => (app.src?.kind === 'static' ? STATIC_POLL : HOUR);

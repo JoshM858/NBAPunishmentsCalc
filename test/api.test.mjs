@@ -37,6 +37,40 @@ let fake = installFakeEspn();
 }
 fake.restore();
 
+// The player pool, one player, and bios: validated, passed through, never trusting the query string
+{
+  fake = installFakeEspn();
+  const pool = await get('/api/players');
+  assert.equal(pool.res.status, 200);
+  assert.ok(Array.isArray(pool.body.players));
+  const f = JSON.parse(fake.calls.at(-1).filter);
+  assert.deepEqual(f.players.filterStatus.value, ['FREEAGENT', 'WAIVERS', 'ONTEAM']);
+  assert.equal(f.players.limit, 500);
+  assert.ok(f.players.filterStatsForTopScoringPeriodIds.additionalValue.includes('102027'));
+  const n = fake.calls.length;
+  await get('/api/players');
+  assert.equal(fake.calls.length, n, 'the pool is cached');
+
+  assert.equal((await get('/api/player?id=abc')).res.status, 400);
+  assert.equal((await get('/api/player?id=1;drop')).res.status, 400);
+  assert.equal((await get('/api/player')).res.status, 400);
+  assert.equal((await get('/api/player?id=5104157')).res.status, 200);
+  const one = JSON.parse(fake.calls.at(-1).filter);
+  assert.deepEqual(one.players.filterIds.value, [5104157]);
+  assert.equal(one.players.filterStatsForTopScoringPeriodIds.value, 40);
+  assert.ok(one.players.filterStatsForTopScoringPeriodIds.additionalValue.includes('002026'), 'last season totals');
+
+  assert.equal((await get('/api/bios?team=../etc')).res.status, 400);
+  assert.equal((await get('/api/bios')).res.status, 400);
+  const bios = await get('/api/bios?team=sa');
+  assert.deepEqual(bios.body.players, [{ playerId: 6578, age: 34, height: "6' 8\"", weight: '225 lbs', exp: 14, jersey: '40', born: '1992-05-30' }]);
+  assert.ok(!JSON.stringify(bios.body).includes('Not Kept'), 'only the fields the page reads');
+  assert.equal((await get('/api/bios?team=zz')).res.status, 502);
+  assert.equal((await get('/api/league?view=mDraftDetail')).res.status, 200);
+  assert.equal((await get('/api/players', { LEAGUE_ID: '' })).res.status, 500);
+  fake.restore();
+}
+
 // Config never leaks cookie values
 {
   fake = installFakeEspn();

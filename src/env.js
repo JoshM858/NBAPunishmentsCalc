@@ -16,7 +16,8 @@ export function parseEnv(text) {
 }
 
 // .env values, overridden by real environment variables (what GitHub Actions provides).
-export function loadEnv(file = new URL('../.env', import.meta.url)) {
+// PW_ENV_FILE points at a different file (the tests use a missing one so a developer's real .env can't leak in).
+export function loadEnv(file = process.env.PW_ENV_FILE || new URL('../.env', import.meta.url)) {
   let fromFile = {};
   try {
     fromFile = parseEnv(readFileSync(file, 'utf8'));

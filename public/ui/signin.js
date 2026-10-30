@@ -22,18 +22,25 @@ export function signInHtml(account, teams, why = 'to see your players and test t
     </div></section>`;
 }
 
-// Wire clicks and the PIN form inside `root` to the account. Call once per root element.
+// Event handlers for the panel above: pass them to a page's el.onclick / el.onsubmit (or use bindSignIn for a persistent root).
+export function signInClick(e, account) {
+  const b = e.target.closest('[data-a=signin]');
+  if (!b) return false;
+  account.choose(Number(b.dataset.id));
+  return true;
+}
+
+export function signInSubmit(e, account) {
+  const f = e.target.closest('[data-a=pinform]');
+  if (!f || account.state.pending == null) return false;
+  e.preventDefault();
+  account.signInWithPin(account.state.pending, f.querySelector('input').value);
+  return true;
+}
+
 export function bindSignIn(root, account) {
-  root.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-a=signin]');
-    if (b) account.choose(Number(b.dataset.id));
-  });
-  root.addEventListener('submit', (e) => {
-    const f = e.target.closest('[data-a=pinform]');
-    if (!f || account.state.pending == null) return;
-    e.preventDefault();
-    account.signInWithPin(account.state.pending, f.querySelector('input').value);
-  });
+  root.addEventListener('click', (e) => signInClick(e, account));
+  root.addEventListener('submit', (e) => signInSubmit(e, account));
 }
 
 export function focusPin(root) {

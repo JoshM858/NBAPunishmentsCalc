@@ -10,7 +10,7 @@ export function renderSubnav(page, route, nav, inner) {
   const tabs = page?.tabs;
   nav.hidden = !tabs?.length;
   if (!tabs?.length) return;
-  const cur = route.tab || tabs[0].id;
+  const cur = /^\d+$/.test(route.tab) ? tabs[0].id : route.tab || tabs[0].id; // a player id keeps "Database" lit
   inner.innerHTML = tabs.map((t) => `<a href="${link(page.id, t.id)}"${t.id === cur ? ' aria-current="page"' : ''}>${esc(t.label)}</a>`).join('');
 }
 

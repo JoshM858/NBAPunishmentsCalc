@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const port = 18000 + Math.floor(Math.random() * 1000);
 const child = spawn(process.execPath, [`${root}src/server.js`], {
-  env: { PATH: process.env.PATH, HOME: process.env.HOME, PORT: String(port), LEAGUE_ID: '424242', SEASON: '2027', TEAM_PINS: '1=482913,2=193846', SESSION_SECRET: 'test-secret' },
+  env: { PATH: process.env.PATH, HOME: process.env.HOME, PW_ENV_FILE: '/nonexistent/none.env', PORT: String(port), LEAGUE_ID: '424242', SEASON: '2027', TEAM_PINS: '1=482913,2=193846', SESSION_SECRET: 'test-secret' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let log = '';

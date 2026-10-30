@@ -16,7 +16,7 @@ const SWID = '{11111111-2222-3333-4444-555555555555}';
 const base = { LEAGUE_ID: '424242', SEASON: '2027', ESPN_S2: S2, ESPN_SWID: SWID };
 
 function build(extra = {}, { out = `${work}/site`, cache = `${work}/cache.json`, log } = {}) {
-  const env = { PATH: process.env.PATH, HOME: process.env.HOME, ...base, ...extra, ...(log ? { FAKE_ESPN_LOG: log } : {}) };
+  const env = { PATH: process.env.PATH, HOME: process.env.HOME, PW_ENV_FILE: `${work}/no-such.env`, ...base, ...extra, ...(log ? { FAKE_ESPN_LOG: log } : {}) };
   for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k];
   const r = spawnSync(process.execPath, ['--import', `${root}test/fake-espn-register.mjs`, `${root}scripts/build-snapshot.mjs`, '--out', out, '--cache', cache], { env, encoding: 'utf8', cwd: work });
   return { ...r, text: `${r.stdout}${r.stderr}` };
@@ -44,6 +44,10 @@ assert.equal(snap.config.platform, 'static');
 assert.equal(snap.freeAgents.length, 14, 'free agents are published for the trade tab');
 assert.deepEqual(Object.keys(snap.freeAgents[0]).sort(), ['eligibleSlots', 'injury', 'name', 'playerId', 'projAvg', 'proTeamId', 'seasonAvg', 'seasonGP'].sort());
 assert.equal((await createSnapshotSource(snap).freeAgents()).length, 14);
+assert.ok(snap.players.length > 0 && snap.players[0].id && 'avg' in snap.players[0] && 'rank' in snap.players[0], 'the player pool is published for the Players pages');
+assert.equal((await createSnapshotSource(snap).players()).length, snap.players.length);
+assert.equal((await createSnapshotSource(snap).player(snap.players[0].id)).id, snap.players[0].id);
+assert.ok(snap.bios && typeof snap.bios === 'object', 'bios are published');
 assert.deepEqual(snap.injuries.map((i) => [i.playerId, i.returnDate, i.guess]), [[1001, '2026-11-20', true]], 'the injury report is published, with the no-timetable flag');
 assert.ok(!('leagueId' in snap.config) && !('hasCookies' in snap.config));
 assert.ok(Math.abs(Date.now() - Date.parse(snap.generatedAt)) < 120_000);

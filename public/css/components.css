@@ -141,3 +141,17 @@ label.field > :not(span) { text-transform: none; letter-spacing: normal; }
 
 .panel.flush .lede { padding: 12px 16px 4px; margin: 0; }
 @media (max-width: 760px) { .hide-sm { display: none; } }
+
+/* ---- spark bars, labelled bars, pager ---- */
+.spark { display: inline-flex; align-items: flex-end; gap: 2px; width: 40px; }
+.spark i { flex: 1; background: var(--accent); min-height: 2px; opacity: 0.85; }
+.tbl tr.sel .spark i { background: var(--on-accent); }
+.rowbar { display: grid; grid-template-columns: 110px 1fr 38px; align-items: center; gap: 8px; margin: 6px 0; font-size: 12px; }
+.rowbar > span { color: var(--text-2); }
+.rowbar b { text-align: right; font-variant-numeric: tabular-nums; }
+.pager { display: flex; align-items: center; gap: 10px; justify-content: flex-end; padding: 10px 12px; color: var(--text-2); font-size: 12px; border-top: 1px solid var(--line-soft); }
+.player-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.player-cell b { font-weight: 600; }
+.player-cell small { display: block; color: var(--muted); font-size: 11px; }
+.tbl tr.sel .player-cell small { color: var(--on-accent); opacity: 0.7; }
+.tcell { display: inline-flex; align-items: center; gap: 6px; }

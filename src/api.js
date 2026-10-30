@@ -4,11 +4,13 @@
 // Cloudflare plan's 10 ms CPU limit.
 
 const ESPN = 'https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons';
-const VIEWS = new Set(['mSettings', 'mTeam', 'mRoster', 'mMatchup', 'mMatchupScore', 'mStatus', 'mScoreboard', 'mStandings', 'mTransactions2']);
+const VIEWS = new Set(['mSettings', 'mTeam', 'mRoster', 'mMatchup', 'mMatchupScore', 'mStatus', 'mScoreboard', 'mStandings', 'mTransactions2', 'mDraftDetail']);
 const LIVE_TTL = 90;
 const PAST_TTL = 12 * 3600;
 const SCHEDULE_TTL = 6 * 3600;
 const SCOREBOARD = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard';
+const TEAMS = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams';
+const POOL_LIMIT = 500;
 const INJURIES = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries';
 
 // Stand-in for the Workers Cache API when running under Node.
@@ -129,6 +131,51 @@ async function handle(request, env, ctx, state) {
           }
         }
         return { players };
+      });
+    }
+
+    // Every player ESPN knows about (owned and free, by ownership), as ESPN sends it. Streamed unparsed and cached
+    // ten minutes: the page slims it, which keeps the Worker well inside the free plan's CPU limit.
+    if (url.pathname === '/api/players') {
+      if (!leagueId) return json({ error: 'LEAGUE_ID is not set.' }, 500);
+      const filter = {
+        players: {
+          filterStatus: { value: ['FREEAGENT', 'WAIVERS', 'ONTEAM'] },
+          limit: POOL_LIMIT,
+          sortPercOwned: { sortAsc: false, sortPriority: 1 },
+          filterStatsForTopScoringPeriodIds: { value: 5, additionalValue: [`00${season}`, `01${season}`, `02${season}`, `03${season}`, `10${season}`] },
+        },
+      };
+      const target = `${ESPN}/${season}/segments/0/leagues/${leagueId}?view=kona_player_info`;
+      return await proxy(target, { cookie, ctx, ttl: 600, fresh: await wantFresh('players'), what: 'league', season, leagueId, headers: { 'x-fantasy-filter': JSON.stringify(filter) }, variant: '#pool' });
+    }
+
+    // One player with his recent games (and last season's totals), as ESPN sends it
+    if (url.pathname === '/api/player') {
+      if (!leagueId) return json({ error: 'LEAGUE_ID is not set.' }, 500);
+      const id = url.searchParams.get('id') || '';
+      if (!/^\d{1,9}$/.test(id)) return json({ error: 'id must be a player number.' }, 400);
+      const filter = {
+        players: {
+          filterIds: { value: [Number(id)] },
+          filterStatsForTopScoringPeriodIds: { value: 40, additionalValue: [`00${season}`, `01${season}`, `02${season}`, `03${season}`, `10${season}`, `00${season - 1}`] },
+        },
+      };
+      const target = `${ESPN}/${season}/segments/0/leagues/${leagueId}?view=kona_player_info`;
+      return await proxy(target, { cookie, ctx, ttl: 300, fresh: await wantFresh('player'), what: 'league', season, leagueId, headers: { 'x-fantasy-filter': JSON.stringify(filter) }, variant: `#p${id}` });
+    }
+
+    // Age, height, weight and experience for one NBA team's players (ESPN's public roster feed), cached a day.
+    // One team per request keeps each call small; the page asks for all 30.
+    if (url.pathname === '/api/bios') {
+      const team = url.searchParams.get('team') || '';
+      if (!/^[a-z]{2,5}$/i.test(team)) return json({ error: 'team must be an NBA team abbreviation like sa or lal.' }, 400);
+      return trimmed(`bios-${team.toLowerCase()}`, 86_400, ctx, false, async () => {
+        const res = await fetch(`${TEAMS}/${team.toLowerCase()}/roster`, { headers: { Accept: 'application/json' } });
+        if (!res.ok) return json({ error: `ESPN’s roster for ${team} returned HTTP ${res.status}.` }, 502);
+        return {
+          players: ((await res.json()).athletes || []).map((a) => ({ playerId: Number(a.id), age: a.age ?? null, height: a.displayHeight || null, weight: a.displayWeight || null, exp: a.experience?.years ?? null, jersey: a.jersey || null, born: a.dateOfBirth?.slice(0, 10) || null })),
+        };
       });
     }
 

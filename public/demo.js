@@ -1,4 +1,5 @@
 // Fake league shaped like ESPN's API responses. Used for ?demo and the tests.
+import { parsePool } from './players-data.js';
 
 const SEASON = 2027;
 const CURRENT_SP = 10;
@@ -182,7 +183,38 @@ export function createDemo({ withSchedule = false } = {}) {
     return raw;
   }
 
+  // The player pool in ESPN's kona_player_info shape, so ?demo exercises the same parser as the real site
+  function poolRaw() {
+    const free = Array.from({ length: 30 }, (_, i) => ({ id: 9000 + i, fullName: `${FIRST[i % FIRST.length]} ${LAST[(i * 3 + 1) % LAST.length]}`, proTeamId: 1 + ((i * 7) % 30), mu: 30 - i * 0.6, eligibleSlots: ELIGIBLE[i % 5], injuryStatus: i === 2 ? 'OUT' : 'ACTIVE', projAvg: 29 - i * 0.5, games: {} }));
+    const all = [...teams.flatMap((t) => t.players.map((p) => ({ p, teamId: t.id }))), ...free.map((p) => ({ p, teamId: 0 }))];
+    const ranked = [...all].sort((a, b) => b.p.mu - a.p.mu);
+    const entries = all.map(({ p, teamId }) => {
+      const gp = Math.max(1, Object.keys(p.games).filter((s) => +s < CURRENT_SP).length || 7);
+      const base = p.mu / 1.9; // fantasy points are roughly twice real points in this scoring
+      const block = (id, source, avg) => ({ id: `${id}${SEASON}`, seasonId: SEASON, scoringPeriodId: 0, statSourceId: source, statSplitTypeId: 0, appliedAverage: avg, appliedTotal: avg * gp, stats: { 0: base * gp, 6: base * 0.4 * gp, 3: base * 0.25 * gp, 2: base * 0.04 * gp, 1: base * 0.03 * gp, 11: base * 0.1 * gp, 13: base * 0.38 * gp, 14: base * 0.8 * gp, 15: base * 0.2 * gp, 16: base * 0.25 * gp, 17: base * 0.1 * gp, 18: base * 0.28 * gp, 40: 30 * gp, 42: gp } });
+      const rank = ranked.findIndex((r) => r.p === p) + 1;
+      const own = Math.max(1, Math.min(99.9, 100 - rank * 0.9));
+      const games = Object.entries(p.games).filter(([s]) => +s < CURRENT_SP).slice(-5).map(([sp, pts]) => ({ id: `05${proGames.get(p.proTeamId)[sp][0].id}`, seasonId: SEASON, scoringPeriodId: +sp, statSourceId: 0, statSplitTypeId: 5, appliedTotal: pts, stats: { 0: pts / 1.9, 6: pts / 4.7, 3: pts / 7.5, 2: 1, 1: 0, 11: 2, 13: pts / 5, 14: pts / 2.4, 17: 1, 40: 30 } }));
+      return {
+        id: p.id,
+        onTeamId: teamId,
+        status: teamId ? 'ONTEAM' : 'FREEAGENT',
+        ratings: { 0: { totalRanking: rank, positionalRanking: 1 + (rank % 9), totalRating: Math.round(p.mu * gp) } },
+        player: {
+          id: p.id, fullName: p.fullName, proTeamId: p.proTeamId, injuryStatus: p.injuryStatus, eligibleSlots: p.eligibleSlots, defaultPositionId: 1 + (p.id % 5), jersey: String(p.id % 40),
+          ownership: { percentOwned: own, percentStarted: own * 0.9, averageDraftPosition: rank * 1.1 },
+          lastNewsDate: now - (p.id % 9) * 3_600_000, seasonOutlook: 'Demo player: this is made-up data.',
+          stats: [block('00', 0, p.mu), block('01', 0, p.mu * 1.02), block('02', 0, p.mu), block('03', 0, p.mu * 0.99), block('10', 1, p.projAvg), ...games],
+        },
+      };
+    });
+    return { players: entries };
+  }
+
   return {
+    players: async () => parsePool(poolRaw(), SEASON),
+    player: async (id) => parsePool(poolRaw(), SEASON, { box: true, outlook: true }).find((x) => x.id === Number(id)) ?? null,
+    bios: async () => new Map(Array.from({ length: 400 }, (_, i) => [1001 + i, { playerId: 1001 + i, age: 20 + (i % 16), height: `6' ${i % 12}"`, weight: `${190 + (i % 60)} lbs`, exp: i % 12 }])),
     config: async () => ({ configured: true, demo: true, leagueId: 'demo', season: SEASON }),
     league: async (views, opts) => structuredClone(league(views, opts)),
     pro: async () => structuredClone(proRaw),

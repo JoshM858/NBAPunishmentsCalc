@@ -71,6 +71,15 @@ try {
   const ctx = await loadLeague(rec);
   const freeAgents = await src.freeAgents().catch(() => []); // optional: the page falls back to a typical replacement level
   if (ctx.unconfigured) fail('LEAGUE_ID is not set.');
+  // The player pool and bios feed the Players pages. Optional too: without them those pages say so.
+  const players = await src.players().catch((err) => (console.log(`Warning: no player pool in the snapshot (${err.message})`), []));
+  const abbrevs = [...new Set([...ctx.pro.abbrev.values()].filter((a) => a && a !== 'FA'))];
+  const bioMap = players.length && src.bios ? await src.bios(abbrevs) : new Map();
+  const bios = {};
+  for (const pl of players) {
+    const b = bioMap.get(pl.id);
+    if (b) bios[pl.id] = { age: b.age, height: b.height, weight: b.weight, exp: b.exp };
+  }
   recording = false;
   const { check } = await loadSeasonDays(ctx, rec);
 
@@ -92,6 +101,8 @@ try {
     league: leagueSlim,
     pro: slimPro(proRaw),
     freeAgents,
+    players,
+    bios,
     injuries: injuriesRaw,
     days,
     history,
@@ -124,7 +135,7 @@ try {
   const model = buildModel({ ...ctx, now: Date.now() });
   const bad = check.filter((c) => !c.ok);
   console.log(`${model.leagueName}: week ${model.week.id} (${model.week.label}), ${ctx.league.teams.length} teams, ${ctx.source} method, weeks from ${ctx.weeks.source}.`);
-  console.log(`Wrote ${outDir}/data/snapshot.json (${(text.length / 1024).toFixed(0)} KB, ${Object.keys(days).length} day rosters, ${Object.keys(history).length} days of history).`);
+  console.log(`Wrote ${outDir}/data/snapshot.json (${(text.length / 1024).toFixed(0)} KB, ${players.length} players, ${Object.keys(days).length} day rosters, ${Object.keys(history).length} days of history).`);
   if (bad.length) {
     const msg = `${bad.length} team(s) don’t match ESPN’s season total: ${bad.map((b) => `${b.name} ESPN ${b.espn} vs rebuilt ${b.ours}`).join('; ')}`;
     console.log(process.env.GITHUB_ACTIONS ? `::warning title=Totals check::${msg}` : `Warning: ${msg}`);
