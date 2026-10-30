@@ -137,7 +137,7 @@ Limits to know: injuries are the biggest unknown (a player's play rate misses by
 
 ## Install it on your phone
 
-Open the site in the phone's browser, then **Add to Home Screen** (iPhone: Share, Add to Home Screen; Android Chrome: menu, Install app). It opens full screen like an app, named **NBA Punishments**, with the icon in `public/icons/`. The icon is a placeholder: `docs/LOGO_PROMPT.md` has a prompt for ChatGPT to make a real logo and says which files to replace. The site only saves its page files for fast opening (`public/sw.js`); scores and odds are always fetched live, so they are never stale.
+Open the site in the phone's browser, then **Add to Home Screen** (iPhone: Share, Add to Home Screen; Android Chrome: menu, Install app). It opens full screen like an app, named **NBA Punishments**, with the icon in `public/icons/`. The logo is `public/icons/` (made from your picture); `docs/LOGO_PROMPT.md` has a prompt for ChatGPT to make a real logo and says which files to replace. The site only saves its page files for fast opening (`public/sw.js`); scores and odds are always fetched live, so they are never stale.
 
 On a phone the top bar is just the name, the week and Refresh; the team chip sits at the end of the navigation row, **Change colours** is at the bottom of every page, and the Trade centre hides the small Ideas/Proj buttons (use a player's profile for the projection).
 

@@ -9,4 +9,4 @@ Then make the three icon files and replace the ones in `public/icons/`:
 - `icon-512.png` (512 x 512), `icon-192.png` (192 x 192) and `apple-touch-icon.png` (180 x 180): the image, resized.
 - `maskable-512.png` (512 x 512): the same image with extra background colour around it so the ball sits inside the middle 60% (Android crops this one into a circle or squircle).
 
-`icon.svg` is only the placeholder source and is not used by the phone. After replacing the PNGs run `npm run build:dashboard` if you use the pasted Cloudflare file. On a phone, remove the old home-screen icon and add it again to pick up the new one.
+After replacing the PNGs run `npm run build:dashboard` if you use the pasted Cloudflare file. On a phone, remove the old home-screen icon and add it again to pick up the new one.

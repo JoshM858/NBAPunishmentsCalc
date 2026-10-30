@@ -2,7 +2,7 @@
 .topbar { position: sticky; top: 0; z-index: 40; background: rgba(16, 18, 22, 0.96); backdrop-filter: blur(6px); border-bottom: 1px solid var(--line); }
 .topbar-in { max-width: 1480px; margin: 0 auto; padding: 0 16px; height: var(--top-h); display: flex; align-items: center; gap: 16px; }
 .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.mark { width: 28px; height: 28px; display: grid; place-items: center; background: var(--accent); color: var(--on-accent); font: 800 15px/1 var(--font-head); letter-spacing: 0.02em; flex: 0 0 auto; }
+.mark { width: 30px; height: 30px; border-radius: 6px; flex: 0 0 auto; display: block; }
 .brand h1 { font: 700 20px/1 var(--font-head); letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .brand .sub { display: block; margin-top: 3px; font: 500 11px/1 var(--font-body); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .top-tools { margin-left: auto; display: flex; align-items: center; gap: 10px; }

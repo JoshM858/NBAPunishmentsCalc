@@ -192,3 +192,7 @@ label.field > :not(span) { text-transform: none; letter-spacing: normal; }
 .tm-inputs input[type='color'] { width: 40px; height: 32px; padding: 0; border: 1px solid var(--line); background: none; cursor: pointer; }
 .tm-inputs input[type='text'] { flex: 1; min-width: 0; font-family: ui-monospace, monospace; text-transform: lowercase; }
 .tm-sw { width: 32px; height: 32px; border: 1px solid var(--line); }
+
+.legal-body { margin: 12px 0; max-height: 52vh; overflow: auto; color: var(--text-2); }
+.legal-body h4 { font: 700 14px/1 var(--font-head); letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin: 14px 0 6px; }
+.legal-body p { margin: 0 0 8px; }
