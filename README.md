@@ -135,6 +135,10 @@ Check how the stars hold up on your own league's real trades with `npm run score
 
 Limits to know: injuries are the biggest unknown (a player's play rate misses by about 23 percentage points even when you know his history), so stars measure how sure we are, not a promise. The test used last season's data, and the free-agent list changes daily. Players you would receive who are currently out are flagged. Trades that need a team to drop players are flagged too.
 
+## Make a team lose
+
+On **Transactions, Trade finder**, switch to **Make a team lose**. Choose who benefits (you by default) and the team you want to finish last. It looks at trades for the beneficiary with every other team except the target, re-runs the punishment odds for each, and lists the ones that raise the target's chance of finishing last without costing the beneficiary points (more than 1.5 a week) or raising their own chance of last place (more than 2 points). Each result shows the target's and the beneficiary's last-place chance before and after. The effect is honestly small: a fair trade only makes its partner a little stronger, so when a team's fate is already settled the page says so and shows the closest trades instead. Settings are in `WISH` in `public/wishlose.js`.
+
 ## Terms and Conditions record
 
 The first time someone opens the site they must pick their team (with their PIN if PINs are on) and answer **"Do you accept the Terms and Conditions?"**. The Terms include the punishment pact and sit behind links, with the Privacy policy, in `public/ui/legal.js` (edit the wording there; it is a friendly agreement among friends, not legal advice). Pressing **I accept** writes a record to the server with the team, the date and time, the terms version, the browser and a short one-way fingerprint of the network address. It is saved once per team, keeps its original time if repeated, and the site has no way to remove it, so nobody can back out. There is no decline or close button. The **League, Terms record** tab shows who has accepted and when. Raise `TERMS_VERSION` in `src/api.js` to make everyone accept again after changing the terms.
