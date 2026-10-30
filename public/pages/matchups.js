@@ -1,5 +1,8 @@
 // Matchups: the day recap (live "so far" and final) and the rest-of-week outlook.
-import { esc, fmt, moveBadge, names, ordinal, panel, pct, segmented } from '../ui/dom.js';
+import { dayLabel, localTime, zoneName } from '../logic.js';
+import { gamesOn, playersPerDay } from '../schedule.js';
+import { esc, fmt, moveBadge, names, ordinal, panel, pct, plural, segmented } from '../ui/dom.js';
+import { teamLogo } from '../ui/player.js';
 
 const state = { view: 'live' };
 
@@ -66,10 +69,34 @@ function outlookHtml(app) {
         <tbody>${rest}</tbody></table></div>`, { cls: 'flush' });
 }
 
+// This week's NBA games day by day, and how many of each fantasy team's players have a game each day
+function scheduleHtml(app) {
+  const { week, currentSP } = app.model;
+  const { pro } = app.ctx;
+  const tz = app.tz;
+  const sps = week.sps.filter((sp) => pro.spDate.has(sp));
+  const mine = app.account.team()?.id;
+  const matrix = playersPerDay(app.ctx.league.teams, pro, sps);
+  const max = Math.max(1, ...matrix.flatMap((r) => r.perDay));
+  const head = sps.map((sp) => `<th class="num${sp === currentSP ? ' today' : ''}">${esc(dayLabel(pro, sp).split(' ').slice(0, 1))}<small>${esc(dayLabel(pro, sp).split(' ').slice(1).join(' '))}</small></th>`).join('');
+  const rows = matrix.map((r) => `<tr class="${r.id === mine ? 'me' : ''}"><th scope="row">${esc(r.name)}</th>${r.perDay.map((n, i) => `<td class="num heat${sps[i] < currentSP ? ' past' : ''}" style="--h:${n / max}">${n || '–'}</td>`).join('')}<td class="num strong">${r.total}</td></tr>`).join('');
+  const days = sps.map((sp) => {
+    const games = gamesOn(pro, sp);
+    return `<section class="sched-day${sp === currentSP ? ' now' : ''}"><h4>${esc(dayLabel(pro, sp))} <small>${plural(games.length, 'game')}</small></h4><ul>${games.map((g) => `<li>${teamLogo(g.away)}<b>${esc(g.away)}</b> @ ${teamLogo(g.home)}<b>${esc(g.home)}</b><em>${esc(localTime(g.date, tz))} ${esc(zoneName(g.date, tz))}</em></li>`).join('')}</ul></section>`;
+  }).join('');
+  return `<div class="grid">${panel('Players with a game', `<div class="tbl-wrap"><table class="tbl matrix"><thead><tr><th>Team</th>${head}<th class="num">Total</th></tr></thead><tbody>${rows}</tbody></table></div><p class="note" style="padding:12px 16px">Players on injured reserve aren’t counted. Brighter cells mean more of the team’s players are in action that day. Days are US dates; tip-off times are in ${esc(tz.replace('_', ' '))}.</p>`, { cls: 'flush' })}
+    ${panel('NBA games this week', `<div class="sched">${days}</div>`)}</div>`;
+}
+
 export default {
   id: 'matchups',
   label: 'Matchups',
-  render(app, el) {
+  tabs: [{ id: '', label: 'Day recap' }, { id: 'schedule', label: 'Week schedule' }],
+  render(app, el, route) {
+    if (route.tab === 'schedule') {
+      el.innerHTML = scheduleHtml(app);
+      return;
+    }
     const draw = () => {
       el.innerHTML = `<div class="grid cols-2">${recapHtml(app)}${outlookHtml(app)}</div>`;
     };

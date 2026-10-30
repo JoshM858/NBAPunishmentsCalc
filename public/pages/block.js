@@ -61,7 +61,7 @@ export async function renderBlock(app, el, route) {
   };
   const column = (key, title, max, hint) => {
     const list = ed[key];
-    const slots = Array.from({ length: max }, (_, i) => (list[i] != null ? card(list[i], key) : `<button type="button" class="slot" data-add="${key}">Add player</button>`));
+    const slots = Array.from({ length: max }, (_, i) => (list[i] != null ? card(list[i], key) : `<button type="button" class="slot${i > list.length ? ' extra' : ''}" data-add="${key}">Add player</button>`));
     return `<section class="panel"><header class="panel-h"><h2>${title}</h2><span class="note">${list.length} of ${max}</span></header><div class="panel-b slots"><p class="note">${hint}</p>${slots.join('')}</div></section>`;
   };
 

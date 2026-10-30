@@ -27,3 +27,6 @@ h1, h2, h3, h4, p { margin: 0; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: #3a424e; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
+@media (display-mode: standalone) { .foot { padding-bottom: calc(40px + env(safe-area-inset-bottom)); } }

@@ -3,6 +3,7 @@ import { buildModel, dayInfo, etDateKey, validTimeZone } from './logic.js';
 import { loadLeague, loadSeasonDays } from './pipeline.js';
 import { createAccount } from './account.js';
 import { createPlayerStore } from './players-store.js';
+import { openThemeChooser, startTheme } from './ui/theme-ui.js';
 import { tradeContext } from './trade.js';
 import { createTradeUI } from './trade-ui.js';
 import { createApiSource, createSnapshotSource, checkSnapshot, fetchScoreboard } from './sources.js';
@@ -43,6 +44,17 @@ const app = {
   busy: false,
   boardDone: () => boardDone(),
   loadSeason: () => loadSeason(),
+  // Start loading the earlier weeks (roster method only) and redraw `route` when they arrive. Returns true while loading.
+  ensureSeason(route) {
+    const need = app.ctx?.source === 'roster' && !app.seasonLoaded && app.model?.week.id > 1;
+    if (need && !app.seasonLoading) {
+      app.seasonLoading = loadSeason().catch(() => {}).finally(() => {
+        app.seasonLoading = null;
+        if (app.route === route) show();
+      });
+    }
+    return Boolean(app.seasonLoading);
+  },
   rerender: () => show(),
 };
 const data = () => ({ ctx: app.ctx, src: app.src, now: app.src?.now?.(), dayDone: boardDone() });
@@ -223,7 +235,7 @@ function show() {
   $('updated').textContent = snap
     ? `Data from ${stamp(snap)} (${ago(snap)}). Checked ${clock(app.updated)}.`
     : `Updated ${clock(app.updated)}. Next ${clock(app.updated + HOUR)}.${app.limited ? ' You refreshed a moment ago, so this is the latest available right now.' : ''}`;
-  document.title = `${m.loser?.name ?? 'Punishment Watch'} on track for the punishment`;
+  document.title = `${m.loser?.name ?? 'NBA Punishments'} on track for the punishment`;
 
   const banner = $('banner');
   const stale = snap && Date.now() - snap > STALE_AFTER;
@@ -232,7 +244,7 @@ function show() {
   else if (stale) banner.textContent = `This data is ${ago(snap).replace(' ago', '')} old. The hourly GitHub job may be failing: open the repo’s Actions tab to see why.`;
 
   $('mainnav').hidden = false;
-  renderNav(PAGES, route, $('mainnav'));
+  renderNav(PAGES, route, $('mainnav'), app.account.team());
   renderSubnav(page, route, $('subnav'), $('subnav-in'));
   renderAccount($('account'), app.account.team());
   document.body.classList.toggle('wide', page.id === 'transactions');
@@ -257,7 +269,7 @@ function renderFoot(m) {
       ? `<p class="warn">${plural(bad.length, 'team')} don’t match ESPN’s season total: ${bad.map((b) => `${esc(b.name)} (ESPN ${fmt(b.espn)}, rebuilt ${fmt(b.ours)})`).join('; ')}. Try <a href="?source=roster">roster mode</a>.</p>`
       : `<p class="ok">Every team’s rebuilt total matches ESPN’s season total${app.check.every((c) => c.basis === 'finished days') ? ' (ESPN counts finished days only, so today isn’t in it)' : ''}.</p>`;
   }
-  return `<p>Weekly points are rebuilt from ${how}, so they start at 0 each week no matter what ESPN’s season total says. Dates are US game days. ${weeks} ${refresh}</p>${check}`;
+  return `<p>Weekly points are rebuilt from ${how}, so they start at 0 each week no matter what ESPN’s season total says. Dates are US game days. ${weeks} ${refresh}</p>${check} <button type="button" class="link" data-open="colours">Change colours</button>`;
 }
 
 const SETUP = {
@@ -339,6 +351,10 @@ async function refreshBoard() {
 
 /* ---------- Events ---------- */
 
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-open=colours]')) openThemeChooser();
+});
+
 document.addEventListener('click', async (e) => {
   const action = e.target.closest('[data-action]')?.dataset.action;
   if (!action) return;
@@ -373,4 +389,8 @@ onRoute((route) => {
   app.route = route;
   show();
 });
-load();
+// Saved colours apply straight away; on a first visit the chooser opens once the page behind it has drawn
+if ('serviceWorker' in navigator && !DEMO && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {}); // lets the site install as an app
+const firstVisit = startTheme();
+$('colours').addEventListener('click', () => openThemeChooser());
+load().finally(() => firstVisit && openThemeChooser({ firstRun: true }));

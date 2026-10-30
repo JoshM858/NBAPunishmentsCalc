@@ -22,6 +22,8 @@
     // Seconds between refreshes for each signed-in team (or device); 0 turns the limit off
     "REFRESH_SECONDS": "5"
   }
+  // Trade block (target lists, trading blocks): create a namespace with `npx wrangler kv namespace create BOARD`, then uncomment and paste its id:
+  // "kv_namespaces": [{ "binding": "BOARD", "id": "PASTE-THE-ID-HERE" }],
   // Secrets: also TEAM_PINS (and optionally SESSION_SECRET) if you want a PIN per team, from `npm run pins`.
   // Secrets (never put these here, optional if the league is public): npx wrangler secret put ESPN_S2 / ESPN_SWID
 }

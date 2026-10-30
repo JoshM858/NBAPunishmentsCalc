@@ -73,3 +73,21 @@ No backend, data source, scoring or auth changes. No new dependencies.
 | 3 Core | Dashboard, Players database (2K player-picker layout), Player profile, My Team; new routes `/api/players` (stream), `/api/player` (logs), `/api/bios`, draft view; snapshot gets pool and recent logs | `pages/dashboard.js players.js profile.js team.js`, `players-data.js`, `ui/table.js player.js`, `src/api.js` |
 | 4 Rest | League, Compare, Prospects/Waivers, Trade Centre (3-column slots, Target list / Trading block / Untouchables, finder, ideas, simulate), Draft room, Matchups, Analytics, Transactions | `pages/*.js`, `standings.js analytics.js`, `ui/charts.js` |
 | 5 Verify | all tests, screenshots at desktop, tablet and phone for every page, Cloudflare runtime, GitHub snapshot, README, summary | `test/*`, `scripts/*`, `README.md` |
+
+## 4. What was built (status after Phase 5)
+
+| Phase | Done |
+|---|---|
+| 2 Design system and shell | `public/css/` tokens (exact palette from the brief), base, components, shell, pages; Barlow Condensed + Inter; hash router (`ui/router.js`, old `#week/#recap/#shame/#trade` links redirect); `app.js` is now only the shell; shared sign-in (`account.js`, `ui/signin.js`); seven-section navigation with contextual tabs |
+| 3 Core | `/api/players` (streamed pool), `/api/player` (one player, 40 games, last season), `/api/bios` (one NBA team per call); `players-data.js`, `players-store.js`, `lineup.js`; Dashboard, Players database (2K picker layout), Player profile, My Team; snapshot publishes pool and bios |
+| 4 Remaining | League standings, Punishments, Draft board; Compare; Free agents (waiver sorts); Transactions with Trade centre (existing workspace restyled, 2K-style trade-item slots, Ideas and Proj buttons), Trade finder, Trade block (Target list, Trading block, Untouchables), Activity; Matchups with week schedule; Analytics with five charts |
+| Extras asked for during the work | Confidence meter and O-SHIT meter (`meters.js`); first-run colour chooser with wheel, picker and hex at the same time (`theme.js`, `ui/theme-ui.js`) |
+| 5 Verify | see below |
+
+### Deliberate differences from the brief
+- **No wins, losses, win %, points against or streaks** in standings: ESPN reports none for a total-points league. Teams are ranked by season points, with weeks won and punishments.
+- **"Prospects"** has no data source (ESPN's feed has no draft-prospect list), so that page is the Free agents tab with the waiver sorts the brief lists (average, recent form, improvement, schedule, position, availability).
+- **Draft Room** is a record of the finished draft (board, best and worst picks). ESPN has no way for other apps to draft or to submit trades or lineups, so My Team and the Trade centre advise and the manager acts in ESPN.
+- **No invented ratings.** Percentiles, form, consistency and the meters are computed from real stats and each says how.
+- **The trade workspace keeps its side-by-side, no-scroll lineups** (asked for earlier) and adds the 2K-style "You send / They send" slots on top of it instead of replacing it with three empty columns.
+- No new dependencies; no build step.

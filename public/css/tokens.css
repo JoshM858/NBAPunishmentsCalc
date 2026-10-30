@@ -11,6 +11,8 @@
   --accent: #e8f02a;
   --accent-2: #c8d51e;
   --on-accent: #101216;
+  --hl: #e8f02a; /* third colour: your team, stars */
+  --on-hl: #101216;
   /* text */
   --text: #f5f6f7;
   --text-2: #a0a7b2;

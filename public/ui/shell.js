@@ -2,8 +2,10 @@
 import { esc } from './dom.js';
 import { link } from './router.js';
 
-export function renderNav(pages, route, el) {
-  el.innerHTML = pages.map((p) => `<a href="${link(p.id)}"${p.id === route.section ? ' aria-current="page"' : ''}>${esc(p.label)}</a>`).join('');
+// On a phone the account chip moves into this row (the top bar has no room), so nothing is lost.
+export function renderNav(pages, route, el, team) {
+  el.innerHTML = pages.map((p) => `<a href="${link(p.id)}"${p.id === route.section ? ' aria-current="page"' : ''}>${esc(p.label)}</a>`).join('')
+    + `<a class="nav-acct" href="${link('team')}">${team ? `Team: ${esc(team.name)}` : 'Sign in'}</a>`;
 }
 
 export function renderSubnav(page, route, nav, inner) {

@@ -47,7 +47,7 @@ async function run(label, port, configArgs) {
       return { res, text, ms: performance.now() - t };
     };
     const home = await get('/');
-    check(home.res.status === 200 && home.text.includes('Punishment Watch'), 'serves the page');
+    check(home.res.status === 200 && home.text.includes('NBA Punishments'), 'serves the page');
     const seen = await crawlSite(async (path) => {
       const r = await get(path);
       return { status: r.res.status, text: r.text };
@@ -85,6 +85,36 @@ async function run(label, port, configArgs) {
     check((await meWith(setCookie.split(';')[0])) === 1, 'the cookie identifies the team');
     check((await meWith(setCookie.split(';')[0].replace('pw_team=1.', 'pw_team=2.'))) === null, 'a tampered cookie is refused');
     check((await fetch(`http://127.0.0.1:${port}/api/config`, { method: 'POST' })).status === 405, 'POST is refused');
+
+    // The player pages: the pool streams through unparsed, one player, bios, draft and transactions
+    const pool = await get('/api/players');
+    const poolJson = JSON.parse(pool.text);
+    check(pool.res.status === 200 && poolJson.players?.length > 100 && poolJson.players[0].player?.stats, `player pool (${poolJson.players?.length} players, ${(pool.text.length / 1048576).toFixed(1)} MB, ${pool.ms.toFixed(0)} ms)`);
+    const poolAgain = await get('/api/players');
+    check(poolAgain.res.status === 200 && poolAgain.text.length === pool.text.length && poolAgain.ms < 1000, `the pool repeats identically and quickly (${poolAgain.ms.toFixed(0)} ms the second time)`);
+    const one = JSON.parse((await get('/api/player?id=5104157')).text);
+    check(one.players?.[0]?.player?.fullName === 'Victor Wembanyama', 'one player with his games');
+    check((await get('/api/player?id=abc')).res.status === 400, 'rejects a bad player id');
+    const bios = JSON.parse((await get('/api/bios?team=sa')).text);
+    check(bios.players?.length > 5 && bios.players[0].age > 0, `bios (${bios.players?.length} Spurs)`);
+    check((await get('/api/bios?team=..%2Fx')).res.status === 400, 'rejects a bad team');
+    const draft = JSON.parse((await get('/api/league?view=mDraftDetail&past=1')).text);
+    check(draft.draftDetail?.picks?.length > 0, `draft (${draft.draftDetail?.picks?.length} picks)`);
+    const tx = JSON.parse((await get('/api/league?view=mTransactions2')).text);
+    check(Array.isArray(tx.transactions), 'transactions');
+
+    // The trade block: stored in the BOARD KV namespace, readable by all, writable only by the signed-in team
+    const board = JSON.parse((await get('/api/board')).text);
+    check(board.enabled === true && board.canEdit === false, 'the trade block is on (KV bound) and read-only when signed out');
+    const post = (cookie, body) => fetch(`http://127.0.0.1:${port}/api/board`, { method: 'POST', headers: { cookie: cookie || '', 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    check((await post('', { untouchables: [1] })).status === 401, 'saving the trade block needs a PIN sign-in');
+    const mine = setCookie.split(';')[0];
+    const saved = await post(mine, { teamId: 2, targets: [5104157], block: [1, 2], untouchables: [2], positions: ['PG', 'XX'], note: ' hello\u0000   world ' });
+    const rec = await saved.json();
+    check(saved.status === 200 && rec.teamId === 1, 'a signed-in team saves its own lists, whatever team the request names');
+    check(JSON.stringify(rec.block) === '[1]' && rec.untouchables[0] === 2 && JSON.stringify(rec.positions) === '["PG"]' && rec.note === 'hello world', 'the lists are cleaned (no repeats between block and untouchables, valid positions, tidy note)');
+    const readBack = await (await fetch(`http://127.0.0.1:${port}/api/board`, { headers: { cookie: mine } })).json();
+    check(readBack.canEdit === true && readBack.teams['1']?.targets?.[0] === 5104157, 'the saved lists read back from KV');
   } finally {
     child.kill('SIGTERM');
     await new Promise((r) => setTimeout(r, 500));
@@ -92,8 +122,16 @@ async function run(label, port, configArgs) {
   }
 }
 
-writeFileSync(`${root}.cache/wrangler-bundle.jsonc`, JSON.stringify({ name: 'bundle-check', main: bundle, compatibility_date: '2026-06-01' }));
+// A local stand-in for the BOARD KV namespace (workerd keeps it in memory/disk under .wrangler, never on Cloudflare)
+const kv = [{ binding: 'BOARD', id: 'local-check-board' }];
+writeFileSync(`${root}.cache/wrangler-bundle.jsonc`, JSON.stringify({ name: 'bundle-check', main: bundle, compatibility_date: '2026-06-01', kv_namespaces: kv }));
+// The real wrangler.jsonc plus the KV binding, with paths made absolute because the file moves
+const deploy = JSON.parse(readFileSync(`${root}wrangler.jsonc`, 'utf8').replace(/^\s*\/\/.*$/gm, ''));
+deploy.main = `${root}${deploy.main}`;
+deploy.assets = { ...deploy.assets, directory: `${root}public` };
+deploy.kv_namespaces = kv;
+writeFileSync(`${root}.cache/wrangler-deploy-check.json`, JSON.stringify(deploy));
 await run('The single file you paste into the Cloudflare dashboard (dist/worker-dashboard.js)', 8811, ['-c', `${root}.cache/wrangler-bundle.jsonc`]);
-await run('The Wrangler deploy (wrangler.jsonc: src/worker.js serving public/)', 8812, ['-c', `${root}wrangler.jsonc`]);
+await run('The Wrangler deploy (wrangler.jsonc: src/worker.js serving public/)', 8812, ['-c', `${root}.cache/wrangler-deploy-check.json`]);
 console.log(failures ? `\n${failures} check(s) failed.` : '\nAll checks passed in the Workers runtime. (Cloudflare\'s free-plan CPU limit is not enforced locally.)');
 process.exit(failures ? 1 : 0);

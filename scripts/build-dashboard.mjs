@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = new URL('../', import.meta.url);
 const read = (p) => readFileSync(new URL(p, root), 'utf8');
-const types = { html: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8', json: 'application/json', svg: 'image/svg+xml' };
+const types = { html: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8', json: 'application/json', svg: 'image/svg+xml', webmanifest: 'application/manifest+json' };
+const binary = { png: 'image/png' };
 
 // Every text file under public/, so a new page or stylesheet is never left out of the single-file bundle.
 const walk = (dir) => readdirSync(new URL(`public/${dir}`, root), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(`${dir}${e.name}/`) : [`${dir}${e.name}`]));
@@ -15,6 +16,8 @@ const files = Object.fromEntries(
     .filter((f) => types[f.split('.').pop()])
     .map((f) => [`/${f}`, [types[f.split('.').pop()], read(`public/${f}`)]]),
 );
+// Images go in as base64 text and are decoded when served
+const images = Object.fromEntries(walk('').filter((f) => binary[f.split('.').pop()]).map((f) => [`/${f}`, [binary[f.split('.').pop()], readFileSync(new URL(`public/${f}`, root)).toString('base64')]]));
 const api = read('src/api.js').replace('export async function handleApi', 'async function handleApi');
 
 const out = `// Punishment Watch — single-file Worker for the Cloudflare dashboard.
@@ -25,11 +28,14 @@ const out = `// Punishment Watch — single-file Worker for the Cloudflare dashb
 
 ${api}
 const FILES = ${JSON.stringify(files)};
+const IMAGES = ${JSON.stringify(images)};
 
 export default {
   async fetch(request, env, ctx) {
     const { pathname } = new URL(request.url);
     if (pathname.startsWith('/api/')) return handleApi(request, env, ctx);
+    const img = IMAGES[pathname];
+    if (img) return new Response(Uint8Array.from(atob(img[1]), (c) => c.charCodeAt(0)), { headers: { 'content-type': img[0], 'cache-control': 'public, max-age=86400' } });
     const file = FILES[pathname === '/' ? '/index.html' : pathname];
     if (!file) return new Response('Not found', { status: 404 });
     return new Response(file[1], { headers: { 'content-type': file[0], 'cache-control': 'public, max-age=300' } });

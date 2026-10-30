@@ -2,9 +2,17 @@
 
 Weekly leaderboard for an ESPN fantasy basketball points league. ESPN's season points never reset, so this rebuilds each week from 0 by summing every day's team score, then shows who's last and projects who cops the punishment.
 
-- **This week**: standings from 0, today's live points, projected final, games and players left, chance of finishing last
-- **Day recap**: yesterday's movers, day scores, player and dud of the day, rest-of-week outlook
-- **Shame**: every finished week's last-place team and a running tally
+The site is laid out like a front office, dark and dense, with seven sections along the top:
+
+- **Dashboard**: who is on track for the punishment, with a **confidence** meter on the percentage and an **O-SHIT meter** for how much trouble that team is in, the week's leaderboard, the game-day card, best free agents, hot players and the injury report
+- **My Team**: your lineup by slot, with the best lineup for the next game day and the swaps that get you there (advice only; ESPN has no way for other apps to set a lineup)
+- **Players**: the full player pool in a 2K-style picker (showcase panel plus a sortable, filterable table), **Free agents** with waiver-wire sorts (best ranked, recent form, most improved, games this week), **Compare** for up to four players, and a **profile** for every player (form, consistency, game log, per-game stats, upcoming games and projection)
+- **League**: season standings (points, weeks won, punishments), the punishment history and the draft board with the best and worst picks so far
+- **Transactions**: the **Trade centre** (side-by-side lineups, stars, multi-way, simulate odds, why), the **Trade finder**, the **Trade block** (every manager's target list, trading block and untouchables) and the **Activity** feed
+- **Matchups**: day recap (live "so far" and final), rest-of-week outlook, and the week's NBA schedule with how many of your players play each day
+- **Analytics**: season race, points by week, roster depth, hidden gems on the wire and the player market, each chart explained in a line
+
+Old links (`#week`, `#recap`, `#shame`, `#trade`) still land in the right place. The **Colours** button (it also opens by itself on a first visit) lets each person choose how many theme colours to use, one to three, and set each with a colour wheel, a colour picker or a hex code at the same time. It is saved in that browser only.
 
 You don't need to be league manager. Any league member's login can read the league. If the manager turns on **Make league viewable to public** in league settings, no login is needed at all.
 
@@ -127,6 +135,32 @@ Check how the stars hold up on your own league's real trades with `npm run score
 
 Limits to know: injuries are the biggest unknown (a player's play rate misses by about 23 percentage points even when you know his history), so stars measure how sure we are, not a promise. The test used last season's data, and the free-agent list changes daily. Players you would receive who are currently out are flagged. Trades that need a team to drop players are flagged too.
 
+## Install it on your phone
+
+Open the site in the phone's browser, then **Add to Home Screen** (iPhone: Share, Add to Home Screen; Android Chrome: menu, Install app). It opens full screen like an app, named **NBA Punishments**, with the icon in `public/icons/`. The icon is a placeholder: `docs/LOGO_PROMPT.md` has a prompt for ChatGPT to make a real logo and says which files to replace. The site only saves its page files for fast opening (`public/sw.js`); scores and odds are always fetched live, so they are never stale.
+
+On a phone the top bar is just the name, the week and Refresh; the team chip sits at the end of the navigation row, **Change colours** is at the bottom of every page, and the Trade centre hides the small Ideas/Proj buttons (use a player's profile for the projection).
+
+## Players, lineup advice and the meters
+
+- **Where the player data comes from.** One request to ESPN's player pool (the 500 most-owned players, owned and free, with season, last 7/15/30 days, preseason projection, ownership, rank and the last five games), cached ten minutes and passed through unparsed so a free Cloudflare plan stays inside its CPU limit. Opening a profile asks for that one player's last 40 games and last season's line. Ages and sizes come from the 30 NBA team rosters, one small request per team, cached a day. On the GitHub version the pool and bios are baked into the snapshot every hour, so a profile there shows the last five games and no box scores.
+- **Nothing is invented.** The percentile bars on a profile compare a player's real numbers with every player in the pool who has at least 3 games. ESPN's own rank is shown as ESPN's rank. There are no made-up attribute ratings.
+- **Rank** is ESPN's rank among all players this season for your scoring. **Form** is the last 7 days against the season average. **Consistency** is the spread of his last games (lower is steadier).
+- **Lineup advice** uses the trade rating's player values and lineup engine: it picks the starters that maximise expected points for the next game day with a game still to tip off, using each player's eligible slots. Players whose game has already started are locked where they are, injured-out and injured-reserve players never start.
+- **Confidence meter** (on the Dashboard percentage): half is how much of the week's points are already scored, half is how lopsided the "last place" odds are (an entropy measure). It describes how settled the race is; it is not a statistical margin of error.
+- **O-SHIT meter**: 50% the team's chance of finishing last, 30% how far behind the safest team it projects (against its own ups and downs), 20% how much of the week is locked in. 0 to 19 Chill, 20 to 39 Uneasy, 40 to 59 Sweating, 60 to 79 Panic, 80 and up O-SHIT.
+- **League table.** This league scores total points and has no head-to-head, so ESPN reports no wins, losses or points against. Teams are ranked by season points; weeks won and punishments are counted from each finished week.
+
+## Trade block
+
+Each manager can post a **Target list** (up to 10 players on other teams), a **Trading block** (up to 10 of their own), **Untouchables** (up to 3), up to 5 positions they need and a short note. Everyone can see everyone's lists; only that team can edit its own (they sign in with their team PIN, see above). The Trade finder respects them: untouchables are never offered, and ideas say when a player is on a team's block or target list.
+
+The lists need somewhere to be stored:
+
+- **PC version**: works as is (saved in `.data/board.json`, git-ignored). With no PINs, any team can be edited from the PC version because only your own computer can reach it.
+- **Cloudflare**: create a KV namespace and bind it to the Worker as `BOARD`. In the dashboard: Storage & Databases, KV, Create a namespace (any name), then Workers & Pages, your Worker, Settings, Bindings, Add, KV namespace, variable name `BOARD`. With Wrangler: `npx wrangler kv namespace create BOARD`, then paste the printed `kv_namespaces` block into `wrangler.jsonc` (an example is commented there). Also turn on team PINs, or nobody can save (the site refuses anonymous edits). KV is eventually consistent, so a saved list can take up to about a minute to show for other managers on the other side of the world.
+- **GitHub Pages**: read-only, so the Trade block tab explains that it needs the PC or Cloudflare version.
+
 ## Troubleshooting
 
 - **"This league is private and no ESPN login is set"**: add the cookies, or ask the manager to make the league viewable to the public.
@@ -149,4 +183,4 @@ ESPN reports this league type (`TOTAL_SEASON_POINTS`) with no weekly matchups an
 npm test
 ```
 
-Covers the scoring logic, the week simulation, a guard that the loser odds stay calibrated against a real replayed week (including a real ESPN NBA schedule and an anonymised real league captured with `npm run capture`), the ESPN error handling, the snapshot build (secrets never published, caching, hidden teams) and the Cloudflare bundle. All offline.
+Covers the player pool parsing (a real ESPN pool fixture), lineup advice, standings, draft, activity, schedule, analytics and the colour theme maths, the confidence and O-SHIT meters, the API validation for the new routes, the scoring logic, the week simulation, a guard that the loser odds stay calibrated against a real replayed week (including a real ESPN NBA schedule and an anonymised real league captured with `npm run capture`), the ESPN error handling, the snapshot build (secrets never published, caching, hidden teams) and the Cloudflare bundle. All offline.

@@ -146,7 +146,7 @@ async function handle(request, env, ctx, state) {
           filterStatsForTopScoringPeriodIds: { value: 5, additionalValue: [`00${season}`, `01${season}`, `02${season}`, `03${season}`, `10${season}`] },
         },
       };
-      const target = `${ESPN}/${season}/segments/0/leagues/${leagueId}?view=kona_player_info`;
+      const target = `${ESPN}/${season}/segments/0/leagues/${leagueId}?view=kona_player_info&_=pool`; // the extra parameter keeps this URL distinct from the free-agent one: only a header tells ESPN them apart, and caches key on the URL
       return await proxy(target, { cookie, ctx, ttl: 600, fresh: await wantFresh('players'), what: 'league', season, leagueId, headers: { 'x-fantasy-filter': JSON.stringify(filter) }, variant: '#pool' });
     }
 
@@ -161,7 +161,7 @@ async function handle(request, env, ctx, state) {
           filterStatsForTopScoringPeriodIds: { value: 40, additionalValue: [`00${season}`, `01${season}`, `02${season}`, `03${season}`, `10${season}`, `00${season - 1}`] },
         },
       };
-      const target = `${ESPN}/${season}/segments/0/leagues/${leagueId}?view=kona_player_info`;
+      const target = `${ESPN}/${season}/segments/0/leagues/${leagueId}?view=kona_player_info&_=p${id}`;
       return await proxy(target, { cookie, ctx, ttl: 300, fresh: await wantFresh('player'), what: 'league', season, leagueId, headers: { 'x-fantasy-filter': JSON.stringify(filter) }, variant: `#p${id}` });
     }
 
@@ -190,7 +190,7 @@ async function handle(request, env, ctx, state) {
           filterStatsForTopScoringPeriodIds: { value: 5, additionalValue: [`00${season}`, `10${season}`] },
         },
       };
-      const target = `${ESPN}/${season}/segments/0/leagues/${leagueId}?view=kona_player_info`;
+      const target = `${ESPN}/${season}/segments/0/leagues/${leagueId}?view=kona_player_info&_=fa`;
       return trimmed('free-agents', 600, ctx, await wantFresh('free-agents'), async () => {
         const res = await proxy(target, { cookie, ctx, ttl: 1, fresh: true, what: 'league', season, leagueId, headers: { 'x-fantasy-filter': JSON.stringify(filter) }, variant: '#fa' });
         if (!res.ok) return res;

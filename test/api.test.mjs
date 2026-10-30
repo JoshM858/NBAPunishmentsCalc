@@ -43,6 +43,7 @@ fake.restore();
   const pool = await get('/api/players');
   assert.equal(pool.res.status, 200);
   assert.ok(Array.isArray(pool.body.players));
+  assert.match(fake.calls.at(-1).url, /_=pool$/, 'a URL of its own, since caches key on the URL and ESPN tells filters apart by header');
   const f = JSON.parse(fake.calls.at(-1).filter);
   assert.deepEqual(f.players.filterStatus.value, ['FREEAGENT', 'WAIVERS', 'ONTEAM']);
   assert.equal(f.players.limit, 500);
@@ -232,7 +233,7 @@ for (const [mode, status, pattern] of [
   assert.deepEqual(r.body, { players: [{ playerId: 7, name: 'Free Agent', proTeamId: 3, injury: 'OUT', seasonGP: 6, seasonAvg: 21.5, projAvg: 30, eligibleSlots: [0, 5] }] });
   const filter = JSON.parse(seen[0].filter);
   assert.deepEqual(filter.players.filterStatus.value, ['FREEAGENT', 'WAIVERS']);
-  assert.match(seen[0].url, /view=kona_player_info$/);
+  assert.match(seen[0].url, /view=kona_player_info&_=fa$/);
   assert.equal((await get('/api/free-agents', { LEAGUE_ID: '' })).res.status, 500);
   globalThis.fetch = async () => new Response('{}', { status: 404 });
   const missing = await get('/api/free-agents?fresh=1', { LEAGUE_ID: '555' });

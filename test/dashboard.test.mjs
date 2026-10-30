@@ -20,8 +20,23 @@ const hit = (path) => worker.fetch(new Request(`https://example.workers.dev${pat
 
 const page = await hit('/');
 assert.equal(page.status, 200);
-assert.match(await page.text(), /Punishment Watch/);
+assert.match(await page.text(), /NBA Punishments/);
 for (const f of ['app.js', 'logic.js', 'pipeline.js', 'sources.js', 'trade.js', 'trade-ui.js', 'demo.js', 'css/tokens.css']) assert.equal((await hit(`/${f}`)).status, 200, f);
+// Installable as an app: manifest with the right name, real PNG icons, a service worker
+const manifest = await (await hit('/manifest.webmanifest')).json();
+assert.equal(manifest.name, 'NBA Punishments');
+assert.equal(manifest.short_name, 'NBA Punishments');
+assert.equal(manifest.display, 'standalone');
+for (const icon of manifest.icons) {
+  const res = await hit(`/${icon.src}`);
+  assert.equal(res.status, 200, icon.src);
+  assert.equal(res.headers.get('content-type'), 'image/png');
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  assert.deepEqual([...bytes.slice(0, 4)], [0x89, 0x50, 0x4e, 0x47], `${icon.src} is a real PNG after the bundle's base64 round trip`);
+}
+assert.equal((await hit('/icons/apple-touch-icon.png')).status, 200);
+assert.equal((await hit('/sw.js')).status, 200);
+assert.match(await (await hit('/')).text(), /apple-mobile-web-app-title" content="NBA Punishments"/);
 assert.equal((await hit('/data/snapshot.json')).status, 404);
 assert.equal((await hit('/api/config')).status, 200);
 const league = await hit('/api/league?view=mRoster&view=mTeam&fresh=1');

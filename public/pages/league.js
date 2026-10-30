@@ -103,12 +103,7 @@ export default {
       return;
     }
     // On the roster method the earlier weeks are fetched day by day: start that now and redraw when it lands
-    if (app.ctx.source === 'roster' && !app.seasonLoaded && app.model.week.id > 1 && !app.seasonLoading) {
-      app.seasonLoading = app.loadSeason().catch(() => {}).finally(() => {
-        app.seasonLoading = null;
-        if (app.route === route) app.rerender();
-      });
-    }
+    app.ensureSeason(route);
     const loading = app.seasonLoading ? '<p class="note" style="padding:0 0 12px">Loading earlier weeks…</p>' : '';
     el.innerHTML = loading + (route.tab === 'punishments' ? punishmentsHtml(app) : standingsHtml(app));
   },
