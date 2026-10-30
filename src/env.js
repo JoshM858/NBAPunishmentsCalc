@@ -23,7 +23,7 @@ export function loadEnv(file = new URL('../.env', import.meta.url)) {
   } catch (err) {
     if (err.code !== 'ENOENT') throw err;
   }
-  const keys = ['LEAGUE_ID', 'SEASON', 'ESPN_S2', 'ESPN_SWID', 'HIDE_TEAMS', 'WEEK_START', 'TIMEZONE', 'TEAM_PINS', 'SESSION_SECRET', 'PORT', 'HOST'];
+  const keys = ['LEAGUE_ID', 'SEASON', 'ESPN_S2', 'ESPN_SWID', 'HIDE_TEAMS', 'WEEK_START', 'TIMEZONE', 'TEAM_PINS', 'SESSION_SECRET', 'REFRESH_SECONDS', 'PORT', 'HOST'];
   const env = { ...fromFile };
   for (const k of keys) if (process.env[k]) env[k] = process.env[k];
   return { env, hasFile: Object.keys(fromFile).length > 0 };

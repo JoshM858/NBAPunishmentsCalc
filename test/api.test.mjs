@@ -5,7 +5,7 @@ import { installFakeEspn } from './fake-espn.mjs';
 
 const ctx = { waitUntil() {} };
 const get = async (path, env) => {
-  const res = await handleApi(new Request(`http://local${path}`), { LEAGUE_ID: '424242', SEASON: '2027', ...env }, ctx);
+  const res = await handleApi(new Request(`http://local${path}`), { LEAGUE_ID: '424242', SEASON: '2027', REFRESH_SECONDS: '0', ...env }, ctx);
   return { res, body: await res.json().catch(() => null) };
 };
 const LEAGUE = '/api/league?view=mTeam&view=mRoster';
@@ -274,6 +274,73 @@ for (const [mode, status, pattern] of [
   // Sign out clears the cookie
   r = await post('/api/logout', {});
   assert.match(r.headers.get('set-cookie'), /Max-Age=0/);
+}
+
+// Refresh limit: once every 5 seconds per signed-in team, or per device. Over the limit is not an error.
+{
+  const pins = { TEAM_PINS: '1=482913,2=193846', SESSION_SECRET: 'rl-secret' };
+  const real = globalThis.fetch;
+  let hits = 0;
+  globalThis.fetch = async (input) => {
+    hits++;
+    return new Response(JSON.stringify({ teams: [], marker: hits }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const send = (path, { env = {}, headers = {} } = {}) => handleApi(new Request(`http://rl.test${path}`, { headers }), { LEAGUE_ID: '777', SEASON: '2027', ...env }, ctx);
+  const league = '/api/league?view=mTeam&fresh=1';
+  const login = async (id, pin) => {
+    const res = await handleApi(new Request('http://rl.test/api/login', { method: 'POST', body: JSON.stringify({ teamId: id, pin }) }), { LEAGUE_ID: '777', ...pins }, ctx);
+    return res.headers.get('set-cookie').split(';')[0];
+  };
+
+  // first fresh request from a device goes to ESPN; a second one within the window is answered from the cache
+  const ip = { 'x-real-ip': '10.0.0.1' };
+  let r = await send(league, { headers: ip });
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('x-refresh-limited'), null);
+  assert.equal(hits, 1);
+  r = await send(league, { headers: ip });
+  assert.equal(r.status, 200, 'over the limit is not an error');
+  assert.equal(r.headers.get('x-refresh-limited'), '1', 'but it says so');
+  assert.equal(hits, 1, 'and ESPN was not asked again');
+  assert.equal((await r.json()).marker, 1, 'the cached answer is served');
+  // another device is separate
+  r = await send(league, { headers: { 'x-real-ip': '10.0.0.2' } });
+  assert.equal(r.headers.get('x-refresh-limited'), null);
+  assert.equal(hits, 2);
+  // normal (non-fresh) requests are never limited and never marked
+  r = await send('/api/league?view=mTeam', { headers: ip });
+  assert.equal(r.headers.get('x-refresh-limited'), null);
+  // the limit is per route: refreshing the league does not block refreshing the injury report
+  r = await send('/api/injuries?fresh=1', { headers: ip });
+  assert.equal(r.headers.get('x-refresh-limited'), null);
+
+  // signed-in teams are limited as teams, whichever device they use, and separately from each other
+  const c1 = await login(1, '482913');
+  const c2 = await login(2, '193846');
+  const before = hits;
+  r = await send(league, { env: pins, headers: { cookie: c1, 'x-real-ip': '10.0.0.3' } });
+  assert.equal(r.headers.get('x-refresh-limited'), null, 'team 1’s first refresh');
+  r = await send(league, { env: pins, headers: { cookie: c1, 'x-real-ip': '10.0.0.4' } });
+  assert.equal(r.headers.get('x-refresh-limited'), '1', 'team 1 from another device is still team 1');
+  r = await send(league, { env: pins, headers: { cookie: c2, 'x-real-ip': '10.0.0.3' } });
+  assert.equal(r.headers.get('x-refresh-limited'), null, 'team 2 on the same device has its own allowance');
+  assert.equal(hits, before + 2, 'two real fetches for three requests');
+  // a forged cookie does not buy a separate allowance
+  r = await send(league, { env: pins, headers: { cookie: 'pw_team=1.9999999999.deadbeef', 'x-real-ip': '10.0.0.1' } });
+  assert.equal(r.headers.get('x-refresh-limited'), '1', 'treated as the device it came from');
+
+  // the window passes
+  await new Promise((res) => setTimeout(res, 5200));
+  r = await send(league, { headers: ip });
+  assert.equal(r.headers.get('x-refresh-limited'), null, 'allowed again after 5 seconds');
+
+  // switchable: REFRESH_SECONDS=0 turns it off, another value changes it
+  const n = hits;
+  for (let i = 0; i < 3; i++) assert.equal((await send(league, { env: { REFRESH_SECONDS: '0' }, headers: { 'x-real-ip': '10.0.0.9' } })).headers.get('x-refresh-limited'), null);
+  assert.equal(hits, n + 3, 'no limit: every request fetched');
+  assert.equal((await send('/api/league?view=mTeam&fresh=1', { env: { REFRESH_SECONDS: '60' }, headers: { 'x-real-ip': '10.0.0.8' } })).headers.get('x-refresh-limited'), null);
+  assert.equal((await send('/api/league?view=mTeam&fresh=1', { env: { REFRESH_SECONDS: '60' }, headers: { 'x-real-ip': '10.0.0.8' } })).headers.get('x-refresh-limited'), '1');
+  globalThis.fetch = real;
 }
 
 // .env parsing

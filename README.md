@@ -135,6 +135,10 @@ Limits to know: injuries are the biggest unknown (a player's play rate misses by
 - **Totals don't match**: add `?source=roster` to the URL to force the lineup-based method, and run `npm run check -- --roster`.
 - **GitHub run fails**: open the run in the Actions tab. The error names the missing secret or variable, or the ESPN problem.
 
+## Refresh limit
+
+The Refresh button works once every 5 seconds. It is enforced on the server too, so it cannot be skipped by clicking faster or reloading: the limit is counted for each signed-in team (when team PINs are on) or for each device, and separately for each kind of data. Going over the limit is not an error: you get the latest cached data (never more than a minute or two old) with a note. Change it with `REFRESH_SECONDS` (0 turns it off). Automatic hourly refreshes are not affected.
+
 ## Season-long points leagues
 
 ESPN reports this league type (`TOTAL_SEASON_POINTS`) with no weekly matchups and one meaningless matchup period, so the page ignores it and uses 7-day weeks starting on `WEEK_START` (Tuesday unless you change it). Head-to-head leagues that have real weekly matchup periods use those instead, and read daily team scores from ESPN's matchup feed when it has them.

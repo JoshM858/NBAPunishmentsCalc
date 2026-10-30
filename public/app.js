@@ -27,6 +27,7 @@ const AGO = (ms) => {
   return m < 1 ? 'just now' : m < 90 ? `${m} min ago` : `${Math.round(m / 60)} hours ago`;
 };
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const REFRESH_COOLDOWN = 5000; // the Refresh button works once every 5 seconds (the server enforces the same)
 const STATIC_POLL = 10 * 60_000;
 const STALE_AFTER = 3 * HOUR;
 
@@ -36,6 +37,7 @@ async function apiGet(path, { fresh } = {}) {
   let res;
   try {
     res = await fetch(path, fresh ? { cache: 'no-store' } : undefined);
+    if (res.headers.get('x-refresh-limited')) state.limited = true;
   } catch {
     throw new Error('Couldn’t reach the server. Check your connection, or that the local server is still running.');
   }
@@ -94,13 +96,14 @@ const dayCache = (cfg) => ({
 
 /* ---------- Load ---------- */
 
-const state = { tab: 'week', recapView: 'live', model: null, ctx: null, src: null, updated: 0, tried: 0, busy: false, check: null, board: null, tz: 'Australia/Melbourne' };
+const state = { refreshAt: null, limited: false, tab: 'week', recapView: 'live', model: null, ctx: null, src: null, updated: 0, tried: 0, busy: false, check: null, board: null, tz: 'Australia/Melbourne' };
 const trade = createTradeUI({ panel: $('panel-trade'), data: () => ({ ctx: state.ctx, src: state.src, now: state.src?.now?.(), dayDone: boardDone() }) });
 const BOARD_POLL = 3 * 60_000;
 
 async function load({ fresh = false } = {}) {
   if (state.busy) return;
   state.tried = Date.now();
+  state.limited = false;
   setBusy(true);
   try {
     const src = await pickSource({ fresh });
@@ -139,9 +142,40 @@ async function loadSeason() {
 
 function setBusy(on) {
   state.busy = on;
+  updateRefreshButton();
+}
+
+// "Refresh", "Refreshing…", or "Refresh in 3s" while the 5-second limit is running (it survives a page reload)
+let coolTimer = null;
+function updateRefreshButton() {
   const b = $('refresh');
-  b.disabled = on;
-  b.textContent = on ? 'Refreshing…' : 'Refresh';
+  const left = cooldownLeft();
+  b.disabled = state.busy || left > 0;
+  b.textContent = state.busy ? 'Refreshing…' : left > 0 ? `Refresh in ${Math.ceil(left / 1000)}s` : 'Refresh';
+  clearTimeout(coolTimer);
+  if (left > 0) coolTimer = setTimeout(updateRefreshButton, Math.min(left, 250));
+}
+
+function cooldownLeft() {
+  let at = state.refreshAt;
+  if (at == null) {
+    try {
+      at = Number(localStorage.getItem('pw:refreshAt')) || 0;
+    } catch {
+      at = 0;
+    }
+    state.refreshAt = at;
+  }
+  return Math.max(0, at + REFRESH_COOLDOWN - Date.now());
+}
+
+function startRefresh() {
+  if (state.busy || cooldownLeft() > 0) return;
+  state.refreshAt = Date.now();
+  try {
+    localStorage.setItem('pw:refreshAt', String(state.refreshAt));
+  } catch {}
+  load({ fresh: true });
 }
 
 function render() {
@@ -152,7 +186,7 @@ function render() {
   const snap = state.src.generatedAt;
   $('updated').textContent = snap
     ? `Data from ${stamp(snap)} (${AGO(snap)}). Checked ${clock(state.updated)}.`
-    : `Updated ${clock(state.updated)}. Next ${clock(state.updated + HOUR)}.`;
+    : `Updated ${clock(state.updated)}. Next ${clock(state.updated + HOUR)}.${state.limited ? ' You refreshed a moment ago, so this is the latest available right now.' : ''}`;
   document.title = `${m.loser?.name ?? 'Punishment Watch'} on track for the punishment`;
 
   const banner = $('banner');
@@ -486,7 +520,8 @@ document.addEventListener('click', async (e) => {
 
 // A snapshot site checks for a new file every few minutes; a live site refreshes hourly.
 const interval = () => (state.src?.kind === 'static' ? STATIC_POLL : HOUR);
-$('refresh').addEventListener('click', () => load({ fresh: true }));
+$('refresh').addEventListener('click', startRefresh);
+updateRefreshButton();
 setInterval(() => state.ctx && renderGameDay(), 60_000);
 setInterval(refreshBoard, BOARD_POLL);
 setInterval(() => {

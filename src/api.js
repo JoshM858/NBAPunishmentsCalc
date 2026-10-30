@@ -41,13 +41,36 @@ function defaultSeason(now = new Date()) {
   return now.getUTCFullYear() + (now.getUTCMonth() >= 7 ? 1 : 0);
 }
 
+// Fresh data (the Refresh button, `fresh=1`) is limited to once every REFRESH_SECONDS (default 5) for each route,
+// per signed-in team, or per device when nobody is signed in. Over the limit it is not an error: the request is
+// answered from the cache, which is at most a minute or two old, and the response says so (x-refresh-limited).
 export async function handleApi(request, env, ctx) {
+  const state = { limited: false };
+  const res = await handle(request, env, ctx, state);
+  if (!state.limited) return res;
+  const out = new Response(res.body, res); // cached responses have read-only headers
+  out.headers.set('x-refresh-limited', '1');
+  return out;
+}
+
+async function handle(request, env, ctx, state) {
   const url = new URL(request.url);
   const signIn = url.pathname === '/api/login' || url.pathname === '/api/logout';
   if (request.method !== (signIn ? 'POST' : 'GET')) return json({ error: signIn ? 'Use POST to sign in.' : 'Only GET is supported.' }, 405);
   const season = Number(env.SEASON) || defaultSeason();
   const leagueId = String(env.LEAGUE_ID || '').trim();
   const cookie = cookieHeader(env);
+  const refreshSeconds = env.REFRESH_SECONDS == null || env.REFRESH_SECONDS === '' ? 5 : Number(env.REFRESH_SECONDS);
+  // true when this request may bypass the cache (it asked for fresh data and is within its allowance)
+  const wantFresh = async (route) => {
+    if (url.searchParams.get('fresh') !== '1') return false;
+    if (!(refreshSeconds > 0)) return true;
+    if (await refreshLimited(request, env, route, refreshSeconds)) {
+      state.limited = true;
+      return false;
+    }
+    return true;
+  };
 
   try {
     if (url.pathname === '/api/config') {
@@ -77,7 +100,7 @@ export async function handleApi(request, env, ctx) {
     if (url.pathname === '/api/scoreboard') {
       const date = url.searchParams.get('date') || '';
       if (!/^\d{8}$/.test(date)) return json({ error: 'date must look like 20261028.' }, 400);
-      return trimmed(`scoreboard-${date}`, 30, ctx, url.searchParams.get('fresh') === '1', async () => {
+      return trimmed(`scoreboard-${date}`, 30, ctx, await wantFresh('scoreboard'), async () => {
         const res = await fetch(`${SCOREBOARD}?dates=${date}`, { headers: { Accept: 'application/json' } });
         if (!res.ok) return json({ error: `ESPN’s scoreboard returned HTTP ${res.status}.` }, 502);
         const body = await res.json();
@@ -87,7 +110,7 @@ export async function handleApi(request, env, ctx) {
 
     // Who is hurt and when ESPN expects them back. Trimmed to what the page reads (the raw feed is about 1 MB).
     if (url.pathname === '/api/injuries') {
-      return trimmed('injuries', 1800, ctx, url.searchParams.get('fresh') === '1', async () => {
+      return trimmed('injuries', 1800, ctx, await wantFresh('injuries'), async () => {
         const res = await fetch(INJURIES, { headers: { Accept: 'application/json' } });
         if (!res.ok) return json({ error: `ESPN’s injury report returned HTTP ${res.status}.` }, 502);
         const players = [];
@@ -116,7 +139,7 @@ export async function handleApi(request, env, ctx) {
         },
       };
       const target = `${ESPN}/${season}/segments/0/leagues/${leagueId}?view=kona_player_info`;
-      return trimmed('free-agents', 600, ctx, url.searchParams.get('fresh') === '1', async () => {
+      return trimmed('free-agents', 600, ctx, await wantFresh('free-agents'), async () => {
         const res = await proxy(target, { cookie, ctx, ttl: 1, fresh: true, what: 'league', season, leagueId, headers: { 'x-fantasy-filter': JSON.stringify(filter) }, variant: '#fa' });
         if (!res.ok) return res;
         const stat = (p, id) => p.stats?.find((s) => s.id === id);
@@ -151,7 +174,7 @@ export async function handleApi(request, env, ctx) {
       }
       const target = `${ESPN}/${season}/segments/0/leagues/${leagueId}?${q}`;
       const past = url.searchParams.get('past') === '1';
-      return await proxy(target, { cookie, ctx, ttl: past ? PAST_TTL : LIVE_TTL, fresh: url.searchParams.get('fresh') === '1', what: 'league', season, leagueId });
+      return await proxy(target, { cookie, ctx, ttl: past ? PAST_TTL : LIVE_TTL, fresh: await wantFresh('league'), what: 'league', season, leagueId });
     }
 
     return json({ error: 'Not found.' }, 404);
@@ -228,6 +251,26 @@ function json(body, status = 200, headers = {}) {
     status,
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers },
   });
+}
+
+/* ---------- Refresh limit ---------- */
+
+// Who is asking: a signed-in team, else the device (its IP address as the host reports it).
+async function identityOf(request, env) {
+  const team = await teamFromCookie(request, env);
+  if (team != null) return `team:${team}`;
+  const h = request.headers;
+  return `ip:${h.get('cf-connecting-ip') || h.get('x-real-ip') || String(h.get('x-forwarded-for') || '').split(',')[0].trim() || 'unknown'}`;
+}
+
+// True if this identity already refreshed this route within `seconds`. The marker lives in the same cache as the
+// ESPN responses (shared between the copies of a Worker in one data centre), so the limit holds across requests.
+async function refreshLimited(request, env, route, seconds) {
+  const cache = globalThis.caches?.default ?? memoryCache;
+  const key = new Request(`https://espn-cache.invalid/refresh-limit/${encodeURIComponent(`${await identityOf(request, env)}|${route}`)}`);
+  if (await cache.match(key).catch(() => null)) return true;
+  await cache.put(key, new Response('1', { headers: { 'cache-control': `public, max-age=${Math.max(1, Math.ceil(seconds))}` } })).catch(() => {});
+  return false;
 }
 
 /* ---------- Team PINs ---------- */
