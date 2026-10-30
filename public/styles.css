@@ -440,3 +440,16 @@ table.odds tr.last { background: var(--tint); }
 
 .closer { position: sticky; top: 0; float: right; margin: 6px 8px 0 0; z-index: 1; font: 700 0.85rem/1 inherit; padding: 0.35rem 0.7rem; border: 2px solid var(--ink); border-radius: 999px; background: var(--floor); color: var(--ink); cursor: pointer; }
 .closer:hover { background: var(--ink); color: var(--floor); }
+
+.pv small.pct { font-weight: 500; color: var(--muted); font-size: 0.8em; }
+.verdict .why p { margin: 0.35rem 0; font-size: 0.95rem; }
+table.whytable th small { display: block; font-weight: 500; color: var(--muted); font-size: 0.78rem; }
+table.whytable td small { display: block; color: var(--muted); font-size: 0.72rem; }
+table.whytable th[scope='col'] { white-space: normal; max-width: 7rem; }
+.verdict .scroll { overflow-x: auto; }
+@media (max-width: 720px) { .pv small.pct { display: none; } }
+
+.verdict .split-gain { margin: 0.5rem 0; padding: 0.4rem 0.6rem; border-left: 4px solid var(--ink); background: rgba(28, 35, 64, 0.06); font-size: 0.92rem; }
+.verdict .split-gain p { margin: 0.15rem 0; }
+
+.vline .link.why { font-size: 0.8rem; margin-left: 0.2rem; }

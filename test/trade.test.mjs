@@ -6,7 +6,7 @@ import {
   starsFor, teamGamesThrough, tradeContext, tradeGains, tradeSummary, verdict, winnerConfidence, shortDate,
 } from '../public/trade.js';
 import { injuryMap, buildModel, simulateWeek } from '../public/logic.js';
-import { applyMoves, simulateTrade, tradeBaseline } from '../public/trade.js';
+import { applyMoves, explainMoves, simulateTrade, tradeBaseline } from '../public/trade.js';
 import { loadLeague } from '../public/pipeline.js';
 
 const OUT_STATUSES_TEST = new Set(['OUT', 'SUSPENSION', 'INJURY_RESERVE']);
@@ -414,6 +414,97 @@ const near = (a, b, eps = 1e-6, msg) => assert.ok(Math.abs(a - b) <= eps, `${msg
   // Once the week is over only the typical week is shown
   const over = tradeBaseline({ ...input, league: { ...league, teams: league.teams.map((t) => ({ ...t, roster: t.roster.map((p) => ({ ...p, proTeamId: 0 })) })) } });
   assert.equal(simulateTrade(over, []).thisWeek, null, 'no games left this week, so nothing to re-run');
+}
+
+/* ---------- Explaining the numbers ---------- */
+
+{
+  const real = fixture('real-league.json');
+  const pro = parseProSchedule(fixture('pro-2027.json'));
+  const league = parseLeague(real.league, 2027);
+  const ctx = tradeContext({ league, pro, freeAgents: real.freeAgents, injuries: injuryMap(real.injuries) });
+  const find = (n) => { for (const t of league.teams) for (const p of t.roster) if (p.name.includes(n)) return { team: t, player: p }; };
+  const wemby = find('Wembanyama');
+  const luka = find('Doncic');
+  const teams = [wemby.team, luka.team];
+  const moves = [{ playerId: wemby.player.playerId, from: wemby.team.id, to: luka.team.id }, { playerId: luka.player.playerId, from: luka.team.id, to: wemby.team.id }];
+  const why = explainMoves(ctx, teams, moves);
+  const [w, l] = why.rows;
+
+  // Whatever the exact numbers, the working must add up and match the rating it explains
+  near(w.perGame, w.ppg * w.rate, 1e-9);
+  near(l.perGame, l.ppg * l.rate, 1e-9);
+  near(w.aboveFa, w.perGame - ctx.r, 1e-9);
+  near(w.perWeek, (w.aboveFa * w.canPlay) / why.weeks, 1e-9);
+  assert.ok(w.gp <= w.teamGames && l.gp <= l.teamGames, 'nobody has played more games than his team');
+  assert.ok(why.story.length >= 3);
+  const text = why.story.join(' ');
+  assert.match(text, /Wembanyama/);
+  assert.match(text, /Doncic/);
+  assert.match(text, new RegExp(w.ppg.toFixed(1).replace('.', '\\.')));
+  assert.match(text, /only scores when he plays/);
+  assert.match(text, new RegExp(`played ${w.gp} of his team’s ${w.teamGames} games`));
+  assert.match(text, new RegExp(`${Math.round(w.rate * 100)}% and ${Math.round(l.rate * 100)}%`));
+  assert.match(text, /free agent would give you/);
+  const result = evaluateMultiTrade(ctx, teams, moves);
+  const gainA = result.teams.find((t) => t.id === wemby.team.id).gain;
+  const gainB = result.teams.find((t) => t.id === luka.team.id).gain;
+  const worthGap = Math.abs(w.perWeek - l.perWeek);
+  // the team that gives up the more valuable player loses about the gap, the other gains about the gap
+  const [loser, winner] = w.perWeek > l.perWeek ? [gainA, gainB] : [gainB, gainA];
+  assert.ok(loser < 0 && winner > 0);
+  // Each team's gain is the swap in player value plus a lineup-fit adjustment; both parts are shown, and they add up
+  const swapA = why.swaps[wemby.team.id];
+  const swapB = why.swaps[luka.team.id];
+  near(swapA, -(w.perWeek - l.perWeek), 1e-9);
+  near(swapB, w.perWeek - l.perWeek, 1e-9);
+  near(swapA + (gainA - swapA), gainA, 1e-9);
+  assert.ok(Math.sign(swapA) === -Math.sign(swapB), 'the swap is zero-sum between the two teams');
+  assert.match(text, /lineup fit/);
+
+  // Your exact question: 60.4 against 60.8 points a game, yet the first is worth about 7.7 points a week more
+  {
+    const days = Array.from({ length: 150 }, (_, i) => i + 1);
+    const mkp = (id, name, gp, avg, proj, proTeamId) => ({ playerId: id, name, seasonGP: gp, seasonAvg: avg, projAvg: proj, proTeamId, slot: 11, injury: 'ACTIVE', eligibleSlots: [11] });
+    const A = { id: 2, name: 'Hang Low', roster: [mkp(1, 'Victor Wembanyama', 5, 64.1, 59.3, 24)] };
+    const B = { id: 8, name: 'Champions', roster: [mkp(2, 'Luka Doncic', 4, 64.75, 59.8, 13)] };
+    const c = {
+      days, r: 21.03, replacementFromData: true, missed: () => 0, teamGames: () => 5,
+      valueOf: (p) => playerValue(p, 5), plays: (p, d) => d % 2 === 0, // 75 games left each
+    };
+    const e = explainMoves(c, [A, B], [{ playerId: 1, from: 2, to: 8 }, { playerId: 2, from: 8, to: 2 }]);
+    const [x, y] = e.rows;
+    assert.deepEqual([x.ppg.toFixed(1), y.ppg.toFixed(1)], ['60.4', '60.8'], 'the two figures on the roster');
+    assert.deepEqual([Math.round(x.rate * 100), Math.round(y.rate * 100)], [76, 72], 'but one has played every game and the other missed one');
+    assert.deepEqual([x.perGame.toFixed(1), y.perGame.toFixed(1)], ['46.2', '44.0']);
+    assert.equal(x.canPlay, 75);
+    near(x.perWeek - y.perWeek, ((x.perGame - y.perGame) * 75) / (150 / 7), 1e-9);
+    assert.ok(x.perWeek - y.perWeek > 7 && x.perWeek - y.perWeek < 8.5, `${(x.perWeek - y.perWeek).toFixed(2)} points a week`);
+    const t = e.story.join('\n');
+    // with one starting slot each and nobody else on the roster there is no lineup fit, so the gain is exactly the swap
+    const toy = { ...c, slotIds: [11], rosterLimit: 5, returnOf: () => null, guessOf: () => false, seasonEnd: 0, item: (p) => ({ v: c.valueOf(p).perGame, slots: [11], outNow: false }) };
+    const toyResult = evaluateMultiTrade(toy, [A, B], [{ playerId: 1, from: 2, to: 8 }, { playerId: 2, from: 8, to: 2 }]);
+    near(toyResult.teams.find((q) => q.id === 2).gain, e.swaps[2], 1e-6, 'no lineup fit when there is nothing to fit');
+    near(toyResult.teams.find((q) => q.id === 8).gain, e.swaps[8], 1e-6);
+    assert.match(t, /Luka Doncic scores 60\.8 a game when he plays and Victor Wembanyama 60\.4, which is close/);
+    assert.match(t, /played 5 of his team’s 5 games and Luka Doncic 4 of 5/);
+    assert.match(t, /76% and 72%, which makes 46\.2 and 44\.0 points per team game/);
+    assert.match(t, /Victor Wembanyama comes out 2\.2 points a game ahead over the 75 games left \(about 3\.5 a week\), which is about 7\.[5-9] points a week/);
+  }
+
+  // Injured players: games he can play are cut by the games he misses
+  const hurt = [...league.teams.flatMap((t) => t.roster.map((p) => ({ t, p })))].find(({ p }) => ctx.missed(p) > 10);
+  const other = league.teams.find((t) => t !== hurt.t);
+  const h = explainMoves(ctx, [hurt.t, other], [{ playerId: hurt.p.playerId, from: hurt.t.id, to: other.id }]).rows[0];
+  assert.equal(h.canPlay, h.gamesLeft - h.missed);
+  assert.ok(h.missed > 10 && h.canPlay < h.gamesLeft);
+  // bigger trades still explain, without a head-to-head story
+  const big = explainMoves(ctx, teams, [...moves, { playerId: wemby.team.roster[3].playerId, from: wemby.team.id, to: luka.team.id }]);
+  assert.equal(big.rows.length, 3);
+  assert.ok(big.story.length === 2 && /lineup fit/.test(big.story[0]) && /In general/.test(big.story[1]), 'general explanation only, no head-to-head story');
+  assert.ok(!big.story.some((t) => /scores .* a game when he plays and/.test(t)));
+  // wrong owner is ignored
+  assert.equal(explainMoves(ctx, teams, [{ playerId: wemby.player.playerId, from: luka.team.id, to: wemby.team.id }]).rows.length, 0);
 }
 
 /* ---------- The message you can paste into the group chat ---------- */

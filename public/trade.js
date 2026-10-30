@@ -216,6 +216,7 @@ export function tradeContext({ league, pro, freeAgents = [], injuries = new Map(
     replacementFromData: healthy.length >= STARS.replacementRank,
     rosterLimit: league.rosterLimit,
     valueOf,
+    teamGames: (p) => teamGamesThrough(pro, p.proTeamId, through),
     dayMs,
     returnOf,
     guessOf: (p) => Boolean(p.returnGuess ?? injuries.get(p.playerId)?.guess),
@@ -229,6 +230,65 @@ export function tradeContext({ league, pro, freeAgents = [], injuries = new Map(
     seasonEnd: days.length ? dayMs(days.at(-1)) : 0,
     injuries,
   };
+}
+
+// The working behind a trade's numbers, player by player, in plain language. `rows` has one entry per player who
+// moves: points a game when he plays, how often he plays, the product, games left and what he is worth a week
+// above a free agent. `story` explains in words why two players who score about the same can rate differently.
+export function explainMoves(ctx, teams, moves) {
+  const owner = new Map();
+  for (const t of teams) for (const p of t.roster) owner.set(p.playerId, { team: t, player: p });
+  const weeks = Math.max(1, ctx.days.length / 7);
+  const rows = moves
+    .filter((m) => owner.get(m.playerId)?.team.id === m.from)
+    .map((m) => {
+      const { team, player: p } = owner.get(m.playerId);
+      const v = ctx.valueOf(p);
+      const gamesLeft = ctx.days.filter((d) => ctx.plays(p, d)).length;
+      const missed = ctx.missed(p);
+      const canPlay = Math.max(0, gamesLeft - missed);
+      return {
+        playerId: p.playerId, name: p.name, from: m.from, to: m.to, fromName: team.name,
+        ppg: v.ppg, rate: v.rate, perGame: v.perGame, gp: p.seasonGP || 0, teamGames: Math.max(ctx.teamGames(p), p.seasonGP || 0),
+        gamesLeft, missed, canPlay,
+        aboveFa: v.perGame - ctx.r,
+        perWeek: ((v.perGame - ctx.r) * canPlay) / weeks,
+      };
+    });
+  // What each team's trade is worth if every player simply played every game he can: what comes in minus what goes out.
+  // A team's real gain differs by the "lineup fit" (positions, and who else would start).
+  const swaps = {};
+  for (const r of rows) {
+    swaps[r.to] = (swaps[r.to] ?? 0) + r.perWeek;
+    swaps[r.from] = (swaps[r.from] ?? 0) - r.perWeek;
+  }
+  const one = (n) => n.toFixed(1);
+  const story = [];
+  const out = rows.filter((r) => r.from === rows[0]?.from);
+  const back = rows.filter((r) => r.from !== rows[0]?.from);
+  if (out.length === 1 && back.length === 1) {
+    const [a, b] = [out[0], back[0]];
+    const [hi, lo] = a.ppg >= b.ppg ? [a, b] : [b, a];
+    const better = a.perWeek >= b.perWeek ? a : b;
+    const worse = better === a ? b : a;
+    const same = Math.abs(a.ppg - b.ppg) < 3;
+    story.push(
+      `${hi.name} scores ${one(hi.ppg)} a game when he plays and ${lo.name} ${one(lo.ppg)}${same ? ', which is close' : ''}. But a player only scores when he plays, so the rating uses points a game times how often he plays.`,
+      `${a.name} has played ${a.gp} of his team’s ${a.teamGames} games and ${b.name} ${b.gp} of ${b.teamGames}. Blended with the typical player (about ${Math.round(TRADE.baseRate * 100)}% of games) that is ${Math.round(a.rate * 100)}% and ${Math.round(b.rate * 100)}%, which makes ${one(a.perGame)} and ${one(b.perGame)} points per team game.`,
+    );
+    if (better.name !== hi.name || Math.abs(a.perWeek - b.perWeek) > 1) {
+      story.push(
+        `${better.name} comes out ${one(Math.abs(better.perGame - worse.perGame))} points a game ahead${better.canPlay === worse.canPlay ? ` over the ${better.canPlay} games left (about ${one(better.canPlay / weeks)} a week)` : ''}, which is about ${one(Math.abs(a.perWeek - b.perWeek))} points a week.`,
+      );
+    }
+  }
+  story.push(
+    `Each team’s gain below is that swap, then adjusted for lineup fit: a team can only start players in certain slots (a center can’t fill a guard spot) and a player only helps if he would actually start, so the same swap can be worth more to one team than the other.`,
+  );
+  story.push(
+    `In general: a player’s worth is points a game when he plays × how often he plays × games left, and only the part above what a free agent would give you (about ${one(ctx.r)} points per team game) counts, because you could always pick that player up for nothing. Injured players add nothing until they are back.`,
+  );
+  return { rows, swaps, story, replacement: ctx.r, weeks, replacementFromData: ctx.replacementFromData };
 }
 
 // A message ready to paste into the group chat. `give`/`get` are lists of player names from A's side.

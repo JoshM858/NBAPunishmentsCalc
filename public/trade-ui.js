@@ -1,7 +1,7 @@
 // The Trade tab. While you trade, the page is just the workspace: your team on the left and the team you are
 // trading with on the right, both lineups on one screen with no scrolling. Add more teams for a multi-way trade.
 // The maths is in trade.js.
-import { evaluateMultiTrade, multiSummary, shortDate, simulateTrade, tradeBaseline, tradeContext, tradeSummary } from './trade.js';
+import { evaluateMultiTrade, explainMoves, multiSummary, shortDate, simulateTrade, tradeBaseline, tradeContext, tradeSummary } from './trade.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const signed = (v) => `${v < -0.05 ? '−' : '+'}${Math.abs(v).toFixed(1)}`;
@@ -130,7 +130,7 @@ export function createTradeUI({ panel, data }) {
         const chip = status ? `<span class="inj" title="${esc(full)}">${esc(status)}${back ? `<span class="when"> ${shortDate(back)}</span>` : ''}</span>` : '';
         const pick = st.picks.get(p.playerId);
         const tip = `${p.name}: ${v.ppg.toFixed(1)} points a game when he plays, plays about ${Math.round(v.rate * 100)}% of games${full ? `; ${full}` : ''}`;
-        const body = `<span class="pn">${esc(p.name)}</span>${chip}<span class="pv">${v.ppg.toFixed(1)}</span>`;
+        const body = `<span class="pn">${esc(p.name)}</span>${chip}<span class="pv">${v.ppg.toFixed(1)}<small class="pct"> ×${Math.round(v.rate * 100)}%</small></span>`;
         if (!pickable) return `<li class="prow" title="${esc(tip)}"><div class="pl static">${body}</div></li>`;
         const dest = pick && n > 2
           ? `<label class="dest">→ <select data-t="dest" data-id="${p.playerId}" aria-label="Where ${esc(p.name)} goes">${st.order.filter((id) => id !== team.id).map((id) => `<option value="${id}"${pick.to === id ? ' selected' : ''}>${esc(teamOf(id).name)}</option>`).join('')}</select></label>`
@@ -255,7 +255,7 @@ export function createTradeUI({ panel, data }) {
     const active = r.teams.filter((t) => t.involved).sort((a, b) => b.gain - a.gain);
     const cls = (g) => (g < -2 ? 'neg' : 'pos');
     const name = (id) => (id === me.id ? 'You' : teamOf(id).name);
-    const line = `${starRow(r.stars)} <b>${r.stars}</b> <span class="vlabel">${esc(r.label)}</span><span class="vgain">${active.map((t) => `${esc(name(t.id))} <b class="${cls(t.gain)}">${signed(t.gain)}</b>`).join(' · ')} <small>pts/week</small></span>`;
+    const line = `${starRow(r.stars)} <b>${r.stars}</b> <span class="vlabel">${esc(r.label)}</span><span class="vgain">${active.map((t) => `${esc(name(t.id))} <b class="${cls(t.gain)}">${signed(t.gain)}</b>`).join(' · ')} <small>pts/week</small> <button type="button" class="link why" data-t="sheet">why?</button></span>`;
 
     const head = r.winnerId == null ? 'Dead even.' : teams.length > 2 ? `${esc(name(r.winnerId))} gain${r.winnerId === me.id ? '' : 's'} the most and ${esc(name(r.loserId))} ${r.loserId === me.id ? 'gain' : 'gains'} the least.` : r.winnerId === me.id ? 'You come out ahead.' : `${esc(name(r.winnerId))} comes out ahead.`;
     const lines = [];
@@ -272,11 +272,22 @@ export function createTradeUI({ panel, data }) {
 
     const leagueId = data().ctx.cfg.leagueId;
     const espn = leagueId ? `<a class="link" href="https://fantasy.espn.com/basketball/league?leagueId=${encodeURIComponent(leagueId)}" target="_blank" rel="noopener">Open the league in ESPN to make the trade</a>` : '';
+    const why = explainMoves(ctx, teams, moves);
+    const whyRows = why.rows.map((w) => `<tr><th scope="row">${esc(w.name)}<small>${esc(w.fromName === me.name ? 'yours' : w.fromName)} → ${esc(teamOf(w.to).name === me.name ? 'you' : teamOf(w.to).name)}</small></th><td class="num">${w.ppg.toFixed(1)}</td><td class="num">${Math.round(w.rate * 100)}%</td><td class="num strong">${w.perGame.toFixed(1)}</td><td class="num">${w.canPlay}${w.missed ? `<small>${w.gamesLeft} − ${w.missed} out</small>` : ''}</td><td class="num strong ${w.perWeek < 0 ? 'neg' : ''}">${w.perWeek >= 0 ? '+' : '−'}${Math.abs(w.perWeek).toFixed(1)}</td></tr>`).join('');
     const sheet = `<div class="verdict">
         <h3>${esc(r.label)}</h3>
         <p>${head}</p>
         <div class="gains">${active.map((t) => `<p><span>${esc(name(t.id))}</span><b class="${cls(t.gain)}">${signed(t.gain)}</b> points a week</p>`).join('')}</div>
         ${lines.join('')}
+        <h4>Where the numbers come from</h4>
+        <div class="why">${why.story.map((t) => `<p>${esc(t)}</p>`).join('')}</div>
+        <div class="split-gain">${active.map((t) => {
+          const swap = why.swaps[t.id] ?? 0;
+          const fit = t.gain - swap;
+          return `<p><b>${esc(name(t.id))}</b> ${signed(t.gain)} a week = players ${signed(swap)}, lineup fit ${signed(fit)}</p>`;
+        }).join('')}</div>
+        <div class="scroll"><table class="odds whytable"><thead><tr><th scope="col">Player</th><th scope="col" class="num">Points a game when he plays</th><th scope="col" class="num">Plays</th><th scope="col" class="num">Per team game</th><th scope="col" class="num">Games he can play</th><th scope="col" class="num">Worth a week above a free agent</th></tr></thead><tbody>${whyRows}</tbody></table></div>
+        <p class="note">A free agent is worth about ${why.replacement.toFixed(1)} points per team game${why.replacementFromData ? ' (the 6th best healthy free agent right now)' : ' (a typical level)'}.</p>
         <p class="actions">${espn}</p>
         <details><summary>How the stars are worked out</summary>
           <p class="note">Each player is valued by the points he is expected to score when he plays (his games so far, pulled toward ESPN’s preseason projection) times how often he plays. Each team’s best lineup is then compared for every remaining game day, before and after the trade, against what a free agent could give you${ctx.replacementFromData ? ' (using the real free-agent list)' : ' (a typical free agent)'}. The star rating is how unsure we are who really wins: 5 stars means it is too close to call, and fewer stars mean one side clearly wins. In a multi-way trade it compares the team that gains most with the one that gains least. Injuries can swing any trade, so these are odds, not a promise. This tool only judges a trade; make the real one in ESPN.</p>
@@ -319,7 +330,7 @@ export function createTradeUI({ panel, data }) {
           ${spare.length && n < MAX_TEAMS ? `<select class="multi" data-t="add" aria-label="Add a team for a multi-way trade"><option value="">${n === 2 ? '＋ Multi-way' : '＋ Add team'}</option>${spare.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select>` : ''}
           <button type="button" class="action${st.sim ? ' on' : ''}" data-t="simulate" aria-pressed="${st.sim}"${valid ? '' : ' disabled'}>Simulate</button>
           ${st.sim && valid ? `<button type="button" class="action ghost" data-t="odds" aria-expanded="${st.sheet === 'sim'}">Odds ${st.sheet === 'sim' ? '▴' : '▾'}</button>` : ''}
-          ${result.sheet ? `<button type="button" class="action ghost" data-t="sheet" aria-expanded="${st.sheet === 'details'}">Details${result.notes ? ` (${result.notes})` : ''} ${st.sheet === 'details' ? '▴' : '▾'}</button>` : ''}
+          ${result.sheet ? `<button type="button" class="action ghost" data-t="sheet" aria-expanded="${st.sheet === 'details'}">Why &amp; details${result.notes ? ` (${result.notes})` : ''} ${st.sheet === 'details' ? '▴' : '▾'}</button>` : ''}
         </div>
         <div class="vline" aria-live="polite">${result.line}</div>
         ${simLine}
