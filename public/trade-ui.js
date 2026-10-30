@@ -2,43 +2,21 @@
 // trading with on the right, both lineups on one screen with no scrolling. Add more teams for a multi-way trade.
 // The maths is in trade.js.
 import { evaluateMultiTrade, explainMoves, multiSummary, shortDate, simulateTrade, tradeBaseline, tradeContext, tradeSummary } from './trade.js';
+import { signInHtml, bindSignIn, focusPin } from './ui/signin.js';
+import { esc, pct, signed, starRow } from './ui/dom.js';
 
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const signed = (v) => `${v < -0.05 ? '−' : '+'}${Math.abs(v).toFixed(1)}`;
-const starRow = (n) => `<span class="stars" role="img" aria-label="${n} out of 5 stars">${[1, 2, 3, 4, 5].map((i) => `<span class="star ${n >= i ? 'on' : n >= i - 0.5 ? 'half' : ''}">★</span>`).join('')}</span>`;
 const MAX_TEAMS = 6;
-const pct = (p) => (p < 0.005 ? '<1%' : p > 0.995 ? '>99%' : `${Math.round(p * 100)}%`);
 const SHORT = { OUT: 'out', INJURY_RESERVE: 'IR', SUSPENSION: 'susp', DAY_TO_DAY: 'DTD', GTD: 'GTD', QUESTIONABLE: 'Q', DOUBTFUL: 'D' };
 
 // `data()` returns { ctx, src } for the league that is currently loaded.
-export function createTradeUI({ panel, data }) {
-  const st = { me: null, pins: false, pending: null, pinError: '', view: 'browse', order: [], picks: new Map(), sheet: null, sim: false, simResult: null, simTimer: null, baseline: null, fa: undefined, tctx: null, last: null };
+export function createTradeUI({ data, account }) {
+  const panel = document.createElement('div');
+  panel.className = 'trade-ui';
+  const st = { view: 'browse', order: [], picks: new Map(), sheet: null, sim: false, simResult: null, simTimer: null, baseline: null, fa: undefined, tctx: null, last: null };
   const league = () => data().ctx.league;
   const teamOf = (id) => league().teams.find((t) => t.id === id);
 
-  /* ---------- Who you are ---------- */
-
-  const meKey = () => `pw:me:${data().ctx.cfg.leagueId ?? 'site'}`;
-  const known = (id) => league().teams.some((t) => t.id === id);
-
-  function loadMe() {
-    try {
-      const id = Number(localStorage.getItem(meKey()));
-      return known(id) ? id : null;
-    } catch {
-      return null;
-    }
-  }
-
-  // With team PINs on, the server remembers who you are (a signed cookie), not this browser.
-  async function serverMe() {
-    try {
-      const id = (await (await fetch('api/me', { cache: 'no-store' })).json()).teamId;
-      return known(id) ? id : null;
-    } catch {
-      return null;
-    }
-  }
+  /* ---------- Who you are (see account.js) ---------- */
 
   function startOver() {
     st.view = 'browse';
@@ -51,50 +29,18 @@ export function createTradeUI({ panel, data }) {
     st.last = null;
   }
 
-  function setMe(id) {
-    st.me = id;
+  account.onChange(() => {
     startOver();
-    try {
-      if (id == null) localStorage.removeItem(meKey());
-      else localStorage.setItem(meKey(), String(id));
-    } catch {}
-    render();
-  }
-
-  async function signInWithPin(id, pin) {
-    st.pinError = '';
-    try {
-      const res = await fetch('api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamId: id, pin }) });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) st.pinError = body.error || 'Couldn’t sign in. Try again.';
-      else {
-        st.pending = null;
-        st.me = id;
-        startOver();
-      }
-    } catch {
-      st.pinError = 'Couldn’t reach the server. Try again.';
-    }
-    render();
-  }
-
-  async function signOut() {
-    if (st.pins) await fetch('api/logout', { method: 'POST' }).catch(() => {});
-    st.pending = null;
-    st.pinError = '';
-    setMe(null);
-  }
+    if (panel.isConnected) render();
+  });
+  bindSignIn(panel, account);
 
   // Called after every (re)load of the league. A trade in progress survives a refresh.
-  async function reset(pins) {
-    const before = st.me;
-    st.pins = Boolean(pins);
+  function reset() {
     st.fa = undefined;
     st.tctx = null;
     st.baseline = null;
     st.simResult = null;
-    st.me = st.pins ? await serverMe() : loadMe();
-    if (st.me !== before) startOver();
   }
 
   // Free agents set the replacement level. Loaded once per refresh; without them a typical level is used.
@@ -208,24 +154,8 @@ export function createTradeUI({ panel, data }) {
   /* ---------- Views ---------- */
 
   function signInView() {
-    const teams = league().teams;
-    const pending = st.pins ? teams.find((t) => t.id === st.pending) : null;
-    const intro = st.pins
-      ? 'Pick your team and enter its PIN to see your players and test trades. Ask the league organiser if you don’t know it.'
-      : 'Pick your team to see your players and test trades. This just remembers your team on this device. Everything here is already visible to the whole league, so there is no password.';
-    const form = pending
-      ? `<form class="pin" data-t="pinform">
-          <label for="pin-input">PIN for <b>${esc(pending.name)}</b></label>
-          <input id="pin-input" type="password" inputmode="numeric" autocomplete="off" maxlength="12" required>
-          <button type="submit" class="action">Sign in</button>
-          ${st.pinError ? `<p class="warn" role="alert">${esc(st.pinError)}</p>` : ''}
-        </form>`
-      : '';
-    panel.innerHTML = `<h2 class="panel-title">Who are you?</h2>
-      <p class="lede">${intro}</p>
-      <div class="picks">${teams.map((t) => `<button type="button" class="team-pick${pending?.id === t.id ? ' picked' : ''}" data-t="signin" data-id="${t.id}"><b>${esc(t.name)}</b><span>${esc(t.owner)}</span></button>`).join('')}</div>
-      ${form}`;
-    if (pending) panel.querySelector('#pin-input')?.focus({ preventScroll: true });
+    panel.innerHTML = signInHtml(account, league().teams);
+    focusPin(panel);
   }
 
   function browseView(me) {
@@ -342,7 +272,7 @@ export function createTradeUI({ panel, data }) {
 
   function render() {
     if (!data().ctx) return;
-    const me = teamOf(st.me);
+    const me = account.team();
     const building = Boolean(me) && st.view === 'build' && st.order.length >= 2 && st.order.every(teamOf);
     document.body.classList.toggle('trading', building);
     if (!me) signInView();
@@ -364,7 +294,7 @@ export function createTradeUI({ panel, data }) {
     const bar = panel.querySelector('.tbar');
     panel.style.setProperty('--bar-bottom', `${bar ? bar.getBoundingClientRect().bottom + 6 : 120}px`);
   }
-  window.addEventListener('resize', () => !panel.hidden && fit());
+  window.addEventListener("resize", () => panel.isConnected && fit());
 
   /* ---------- Actions ---------- */
 
@@ -385,15 +315,9 @@ export function createTradeUI({ panel, data }) {
     if (!btn || !data().ctx) return;
     const act = btn.dataset.t;
     const id = Number(btn.dataset.id);
-    if (act === 'signin') {
-      if (st.pins) {
-        st.pending = id;
-        st.pinError = '';
-        render();
-      } else setMe(id);
-    } else if (act === 'signout') signOut();
+    if (act === 'signout') account.signOut();
     else if (act === 'open') {
-      st.order = [st.me, id];
+      st.order = [account.team().id, id];
       st.picks.clear();
       st.view = 'build';
       render();
@@ -452,13 +376,6 @@ export function createTradeUI({ panel, data }) {
     }
   });
 
-  panel.addEventListener('submit', (e) => {
-    if (e.target.closest('[data-t=pinform]') && st.pending != null) {
-      e.preventDefault();
-      signInWithPin(st.pending, e.target.querySelector('input').value);
-    }
-  });
-
   async function copy(btn) {
     if (!st.last) return;
     try {
@@ -475,5 +392,5 @@ export function createTradeUI({ panel, data }) {
     setTimeout(() => (btn.textContent = before), 1800);
   }
 
-  return { render, reset, prefetch, state: st };
+  return { panel, render, reset, prefetch, state: st };
 }

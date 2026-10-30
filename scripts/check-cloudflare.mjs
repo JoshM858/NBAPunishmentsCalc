@@ -1,6 +1,7 @@
 // Runs the site in Cloudflare's real Workers runtime (workerd, via `wrangler dev --local`) and checks it, once as the
 // single-file bundle you paste into the dashboard and once as the Wrangler deploy. Needs `npm install` for wrangler,
 // LEAGUE_ID in .env, and internet (it talks to the real ESPN). Usage: npm run check:cloudflare
+import { crawlSite } from '../test/crawl.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -47,11 +48,12 @@ async function run(label, port, configArgs) {
     };
     const home = await get('/');
     check(home.res.status === 200 && home.text.includes('Punishment Watch'), 'serves the page');
-    const imports = new Set();
-    for (const f of ['app.js', 'logic.js', 'pipeline.js', 'sources.js', 'trade.js', 'trade-ui.js']) for (const m of (await get(`/${f}`)).text.matchAll(/from '\.\/([\w.-]+)'/g)) imports.add(m[1]);
-    const missing = [];
-    for (const f of imports) if ((await get(`/${f}`)).res.status !== 200) missing.push(f);
-    check(!missing.length, `serves every module the page imports (${[...imports].join(', ')})`);
+    const seen = await crawlSite(async (path) => {
+      const r = await get(path);
+      return { status: r.res.status, text: r.text };
+    });
+    const missing = [...seen].filter(([, status]) => status !== 200).map(([f]) => f);
+    check(!missing.length && seen.size >= 15, `serves every module and stylesheet the page loads (${seen.size} files)`);
     check((await get('/data/snapshot.json')).res.status === 404, 'no snapshot here (that is the GitHub version)');
     const cfg = JSON.parse((await get('/api/config')).text);
     check(cfg.configured && cfg.leagueId === env.LEAGUE_ID && cfg.platform === 'cloudflare', 'config reports the league');

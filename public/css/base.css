@@ -1,0 +1,29 @@
+*, *::before, *::after { box-sizing: border-box; }
+html { color-scheme: dark; }
+body {
+  margin: 0;
+  background: radial-gradient(1200px 500px at 70% -10%, #1a1f27 0%, transparent 60%), var(--bg);
+  color: var(--text);
+  font: 400 13px/1.45 var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+a { color: inherit; text-decoration: none; }
+a:hover { color: var(--accent); }
+button { font: inherit; color: inherit; }
+h1, h2, h3, h4, p { margin: 0; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+::selection { background: var(--accent); color: var(--on-accent); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+[hidden] { display: none !important; }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.dim { color: var(--text-2); }
+.pos-text { color: var(--pos); }
+.neg-text { color: var(--neg); }
+.accent-text { color: var(--accent); }
+/* thin scrollbars to match the dense look */
+* { scrollbar-width: thin; scrollbar-color: #3a424e transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #3a424e; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

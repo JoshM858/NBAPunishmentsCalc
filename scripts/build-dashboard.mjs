@@ -1,15 +1,19 @@
 // Bundles the whole site into one file you can paste into the Cloudflare dashboard editor.
 // Usage: node scripts/build-dashboard.mjs [out-file]  ->  dist/worker-dashboard.js
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = new URL('../', import.meta.url);
 const read = (p) => readFileSync(new URL(p, root), 'utf8');
-const types = { html: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8' };
+const types = { html: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8', json: 'application/json', svg: 'image/svg+xml' };
 
+// Every text file under public/, so a new page or stylesheet is never left out of the single-file bundle.
+const walk = (dir) => readdirSync(new URL(`public/${dir}`, root), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(`${dir}${e.name}/`) : [`${dir}${e.name}`]));
 const files = Object.fromEntries(
-  ['index.html', 'styles.css', 'app.js', 'logic.js', 'pipeline.js', 'sources.js', 'trade.js', 'trade-ui.js', 'demo.js'].map((f) => [`/${f}`, [types[f.split('.').pop()], read(`public/${f}`)]]),
+  walk('')
+    .filter((f) => types[f.split('.').pop()])
+    .map((f) => [`/${f}`, [types[f.split('.').pop()], read(`public/${f}`)]]),
 );
 const api = read('src/api.js').replace('export async function handleApi', 'async function handleApi');
 

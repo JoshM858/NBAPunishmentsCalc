@@ -1,35 +1,51 @@
-import { buildModel, dayInfo, dayLabel, duration, etDateKey, gameDays, localTime, validTimeZone, zoneName } from './logic.js';
+// The shell: loads the league, owns shared state, draws the frame and hands each route to a page in pages/.
+import { buildModel, dayInfo, etDateKey, validTimeZone } from './logic.js';
 import { loadLeague, loadSeasonDays } from './pipeline.js';
+import { createAccount } from './account.js';
 import { createTradeUI } from './trade-ui.js';
 import { createApiSource, createSnapshotSource, checkSnapshot, fetchScoreboard } from './sources.js';
+import { PAGES } from './pages/index.js';
+import { ago, clock, esc, fmt, plural, stamp } from './ui/dom.js';
+import { link, onRoute, parseHash } from './ui/router.js';
+import { renderAccount, renderNav, renderSubnav } from './ui/shell.js';
 
 const HOUR = 3_600_000;
 const params = new URLSearchParams(location.search);
 const DEMO = params.has('demo');
 const FORCE_ROSTER = params.get('source') === 'roster';
-
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const fmt = (v) => Number(v || 0).toLocaleString('en-AU', { maximumFractionDigits: 1 });
-const pct = (p) => (p < 0.005 ? '<1%' : p > 0.995 ? '>99%' : `${Math.round(p * 100)}%`);
-const ordinal = (n) => {
-  const s = ['th', 'st', 'nd', 'rd'];
-  const v = n % 100;
-  return n + (s[(v - 20) % 10] || s[v] || s[0]);
-};
-const stamp = (ms) => new Date(ms).toLocaleString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
-const clock = (ms) => new Date(ms).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-const names = (rows) => rows.map((r) => r.name).join(' and ');
-
-const AGO = (ms) => {
-  const m = Math.max(0, Math.round((Date.now() - ms) / 60_000));
-  return m < 1 ? 'just now' : m < 90 ? `${m} min ago` : `${Math.round(m / 60)} hours ago`;
-};
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const REFRESH_COOLDOWN = 5000; // the Refresh button works once every 5 seconds (the server enforces the same)
 const STATIC_POLL = 10 * 60_000;
 const STALE_AFTER = 3 * HOUR;
+const BOARD_POLL = 3 * 60_000;
+
+const $ = (id) => document.getElementById(id);
+
+/* ---------- Shared state: pages read this ---------- */
+
+const app = {
+  demo: DEMO,
+  model: null,
+  ctx: null,
+  src: null,
+  board: null,
+  check: null,
+  seasonLoaded: false,
+  tz: 'Australia/Melbourne',
+  route: parseHash(),
+  limited: false,
+  refreshAt: null,
+  updated: 0,
+  tried: 0,
+  busy: false,
+  boardDone: () => boardDone(),
+  loadSeason: () => loadSeason(),
+  rerender: () => show(),
+};
+const data = () => ({ ctx: app.ctx, src: app.src, now: app.src?.now?.(), dayDone: boardDone() });
+app.account = createAccount({ data });
+app.trade = createTradeUI({ data, account: app.account });
+app.account.onChange(() => app.ctx && (renderAccount($('account'), app.account.team()), show()));
 
 /* ---------- Data source ---------- */
 
@@ -37,7 +53,7 @@ async function apiGet(path, { fresh } = {}) {
   let res;
   try {
     res = await fetch(path, fresh ? { cache: 'no-store' } : undefined);
-    if (res.headers.get('x-refresh-limited')) state.limited = true;
+    if (res.headers.get('x-refresh-limited')) app.limited = true;
   } catch {
     throw new Error('Couldn’t reach the server. Check your connection, or that the local server is still running.');
   }
@@ -96,14 +112,10 @@ const dayCache = (cfg) => ({
 
 /* ---------- Load ---------- */
 
-const state = { refreshAt: null, limited: false, tab: 'week', recapView: 'live', model: null, ctx: null, src: null, updated: 0, tried: 0, busy: false, check: null, board: null, tz: 'Australia/Melbourne' };
-const trade = createTradeUI({ panel: $('panel-trade'), data: () => ({ ctx: state.ctx, src: state.src, now: state.src?.now?.(), dayDone: boardDone() }) });
-const BOARD_POLL = 3 * 60_000;
-
 async function load({ fresh = false } = {}) {
-  if (state.busy) return;
-  state.tried = Date.now();
-  state.limited = false;
+  if (app.busy) return;
+  app.tried = Date.now();
+  app.limited = false;
   setBusy(true);
   try {
     const src = await pickSource({ fresh });
@@ -111,18 +123,19 @@ async function load({ fresh = false } = {}) {
     if (!cfg.configured) return renderSetup(cfg);
 
     const ctx = await loadLeague(src, { forceRoster: FORCE_ROSTER, fresh, cache: dayCache(cfg) });
-    state.src = src;
-    state.ctx = ctx;
-    await trade.reset(cfg.pins);
-    state.tz = validTimeZone(cfg.timezone) ? cfg.timezone : 'Australia/Melbourne';
-    state.model = buildModel({ ...ctx, now: src.now(), dayDone: boardDone() });
-    state.updated = Date.now();
-    state.check = null;
-    state.seasonLoaded = false;
+    app.src = src;
+    app.ctx = ctx;
+    app.trade.reset();
+    await app.account.reset(cfg.pins);
+    app.tz = validTimeZone(cfg.timezone) ? cfg.timezone : 'Australia/Melbourne';
+    app.model = buildModel({ ...ctx, now: src.now(), dayDone: boardDone() });
+    app.updated = Date.now();
+    app.check = null;
+    app.seasonLoaded = false;
     if (src.offline) await loadSeason(); // history is already in the snapshot
-    render();
+    show();
     refreshBoard();
-    trade.prefetch();
+    app.trade.prefetch();
   } catch (err) {
     renderError(err);
   } finally {
@@ -130,18 +143,18 @@ async function load({ fresh = false } = {}) {
   }
 }
 
-// Pull every finished day so we can fill the Shame tab and compare with ESPN's totals.
+// Pull every finished day so we can fill the punishments history and compare with ESPN's totals.
 async function loadSeason() {
-  const { shame, check } = await loadSeasonDays(state.ctx, state.src, { cache: dayCache(state.ctx.cfg) });
-  state.model.shame = shame;
-  state.check = check;
-  state.seasonLoaded = true;
+  const { shame, check } = await loadSeasonDays(app.ctx, app.src, { cache: dayCache(app.ctx.cfg) });
+  app.model.shame = shame;
+  app.check = check;
+  app.seasonLoaded = true;
 }
 
-/* ---------- Render ---------- */
+/* ---------- Refresh button ---------- */
 
 function setBusy(on) {
-  state.busy = on;
+  app.busy = on;
   updateRefreshButton();
 }
 
@@ -150,221 +163,86 @@ let coolTimer = null;
 function updateRefreshButton() {
   const b = $('refresh');
   const left = cooldownLeft();
-  b.disabled = state.busy || left > 0;
-  b.textContent = state.busy ? 'Refreshing…' : left > 0 ? `Refresh in ${Math.ceil(left / 1000)}s` : 'Refresh';
+  b.disabled = app.busy || left > 0;
+  b.textContent = app.busy ? 'Refreshing…' : left > 0 ? `Refresh in ${Math.ceil(left / 1000)}s` : 'Refresh';
   clearTimeout(coolTimer);
   if (left > 0) coolTimer = setTimeout(updateRefreshButton, Math.min(left, 250));
 }
 
 function cooldownLeft() {
-  let at = state.refreshAt;
+  let at = app.refreshAt;
   if (at == null) {
     try {
       at = Number(localStorage.getItem('pw:refreshAt')) || 0;
     } catch {
       at = 0;
     }
-    state.refreshAt = at;
+    app.refreshAt = at;
   }
   return Math.max(0, at + REFRESH_COOLDOWN - Date.now());
 }
 
 function startRefresh() {
-  if (state.busy || cooldownLeft() > 0) return;
-  state.refreshAt = Date.now();
+  if (app.busy || cooldownLeft() > 0) return;
+  app.refreshAt = Date.now();
   try {
-    localStorage.setItem('pw:refreshAt', String(state.refreshAt));
+    localStorage.setItem('pw:refreshAt', String(app.refreshAt));
   } catch {}
   load({ fresh: true });
 }
 
-function render() {
-  const m = state.model;
-  renderGameDay();
+/* ---------- Render ---------- */
+
+function pageFor(route) {
+  return PAGES.find((p) => p.id === route.section) || PAGES[0];
+}
+
+function show() {
+  const m = app.model;
+  if (!m) return;
+  const route = app.route;
+  const page = pageFor(route);
+  if (page.id !== route.section) return void (location.hash = link(page.id)); // unknown route -> dashboard
+
   $('league-name').textContent = m.leagueName;
   $('week-label').textContent = `Week ${m.week.id}, day ${m.week.dayNumber} of ${m.week.days}. ${m.week.label}`;
-  const snap = state.src.generatedAt;
+  const snap = app.src.generatedAt;
   $('updated').textContent = snap
-    ? `Data from ${stamp(snap)} (${AGO(snap)}). Checked ${clock(state.updated)}.`
-    : `Updated ${clock(state.updated)}. Next ${clock(state.updated + HOUR)}.${state.limited ? ' You refreshed a moment ago, so this is the latest available right now.' : ''}`;
+    ? `Data from ${stamp(snap)} (${ago(snap)}). Checked ${clock(app.updated)}.`
+    : `Updated ${clock(app.updated)}. Next ${clock(app.updated + HOUR)}.${app.limited ? ' You refreshed a moment ago, so this is the latest available right now.' : ''}`;
   document.title = `${m.loser?.name ?? 'Punishment Watch'} on track for the punishment`;
 
   const banner = $('banner');
   const stale = snap && Date.now() - snap > STALE_AFTER;
   banner.hidden = !DEMO && !stale;
   if (DEMO) banner.innerHTML = 'Demo data. <a href="./">Open your league</a> once the ESPN cookies are set.';
-  else if (stale) banner.textContent = `This data is ${AGO(snap).replace(' ago', '')} old. The hourly GitHub job may be failing: open the repo’s Actions tab to see why.`;
+  else if (stale) banner.textContent = `This data is ${ago(snap).replace(' ago', '')} old. The hourly GitHub job may be failing: open the repo’s Actions tab to see why.`;
 
-  $('hero').innerHTML = renderHero(m);
-  $('panel-week').innerHTML = renderWeek(m);
-  $('panel-recap').innerHTML = renderRecap(m);
-  $('panel-shame').innerHTML = renderShame(m);
-  trade.render();
+  $('mainnav').hidden = false;
+  renderNav(PAGES, route, $('mainnav'));
+  renderSubnav(page, route, $('subnav'), $('subnav-in'));
+  renderAccount($('account'), app.account.team());
+  document.body.classList.toggle('wide', page.id === 'transactions');
+  if (page.id !== 'transactions') document.body.classList.remove('trading');
+
+  const view = $('view');
+  view.onclick = null;
+  page.render(app, view, route);
   $('foot').innerHTML = renderFoot(m);
-  document.querySelector('.tabs').hidden = false;
-  showTab(state.tab, false);
-}
-
-function renderHero(m) {
-  const L = m.loser;
-  if (!L) return '';
-  const r = m.recap;
-  const final = r?.final
-    ? `<p class="final">Week ${r.week.id} final: ${esc(names(r.last))} ${r.last.length > 1 ? 'share' : 'cops'} the punishment on ${fmt(r.last[0].weekPts)}.</p>`
-    : '';
-  const gap = m.safety ? `${fmt(m.gap)} behind ${esc(m.safety.name)} on projection.` : '';
-  return `${final}
-    <div class="key">
-      <div class="paint">
-        <p class="kicker">On track for the punishment</p>
-        <h2 class="key-team">${esc(L.name)}</h2>
-        ${L.owner ? `<p class="key-owner">${esc(L.owner)}</p>` : ''}
-        <p class="key-line">Sitting on ${fmt(L.weekPts)}, projected ${fmt(L.projFinal)}. ${gap}
-          ${plural(L.gamesLeft, 'game')} left across ${plural(L.playersLeft, 'player')}.</p>
-      </div>
-      <div class="ft" aria-label="${pct(L.odds)} chance of the punishment">
-        <span class="ft-num">${pct(L.odds)}</span>
-        <span class="ft-label">chance</span>
-      </div>
-    </div>`;
-}
-
-function moveBadge(prev, rank) {
-  if (prev == null) return '';
-  const d = prev - rank;
-  if (!d) return '<span class="move flat" aria-label="no change">–</span>';
-  return d > 0
-    ? `<span class="move up" aria-label="up ${d}">▲${d}</span>`
-    : `<span class="move down" aria-label="down ${-d}">▼${-d}</span>`;
-}
-
-function renderWeek(m) {
-  const top = Math.max(1, ...m.rows.map((r) => r.weekPts));
-  const lastRank = Math.max(...m.rows.map((r) => r.rank));
-  const items = m.rows
-    .map((r) => {
-      const cls = [r.rank === lastRank && 'last', r.id === m.loser?.id && 'danger'].filter(Boolean).join(' ');
-      return `<li class="row ${cls}">
-        <div class="rank"><span class="pos">${r.rank}</span>${moveBadge(r.prevRank, r.rank)}</div>
-        <div class="who">
-          <p class="team">${esc(r.name)}</p>
-          ${r.owner ? `<p class="owner">${esc(r.owner)}</p>` : ''}
-        </div>
-        <div class="pts">
-          <span class="big">${fmt(r.weekPts)}</span>
-          ${r.todayPts ? `<span class="today">+${fmt(r.todayPts)} today</span>` : ''}
-        </div>
-        <div class="bar" aria-hidden="true"><span style="width:${(r.weekPts / top) * 100}%"></span></div>
-        <p class="facts">
-          <span>Projected <b>${fmt(r.projFinal)}</b></span>
-          <span>${plural(r.gamesLeft, 'game')} left, ${plural(r.playersLeft, 'player')}</span>
-          <span class="${r.odds >= 0.1 ? 'risk hot' : 'risk'}">${pct(r.odds)} risk</span>
-        </p>
-      </li>`;
-    })
-    .join('');
-  return `<p class="lede">Points since the week started. Everyone resets to 0 when the next week begins.</p>
-    <ol class="board">${items}</ol>`;
-}
-
-function renderRecap(m) {
-  const live = m.recapLive && state.recapView !== 'final' ? m.recapLive : null;
-  const r = live || m.recap;
-  if (!r) return '<p class="empty">The first recap appears after the season’s opening night.</p>';
-
-  const lines = [];
-  if (r.final) lines.push(`<li><b>${esc(names(r.last))}</b> finished last for week ${r.week.id} on ${fmt(r.last[0].weekPts)}.</li>`);
-  for (const c of r.climbers.slice(0, 3)) lines.push(`<li><b>${esc(c.name)}</b> climbed ${c.move} to ${ordinal(c.rank)} with ${fmt(c.dayPts)} on the day.</li>`);
-  for (const f of r.fallers.slice(0, 3)) lines.push(`<li><b>${esc(f.name)}</b> dropped ${-f.move} to ${ordinal(f.rank)}.</li>`);
-  if (!r.climbers.length && !r.fallers.length) lines.push(`<li>${r.dayNumber === 1 ? 'First day of the week, so these are the starting positions.' : 'No change in the order.'}</li>`);
-  lines.push(`<li>Best day: <b>${esc(r.topDay.name)}</b> with ${fmt(r.topDay.dayPts)}. Worst: <b>${esc(r.lowDay.name)}</b> with ${fmt(r.lowDay.dayPts)}.</li>`);
-
-  const table = r.rows
-    .map((x) => `<tr class="${r.last.some((l) => l.id === x.id) ? 'last' : ''}">
-        <td class="num">${x.rank}${moveBadge(x.prevRank, x.rank)}</td>
-        <th scope="row">${esc(x.name)}</th>
-        <td class="num">${fmt(x.dayPts)}</td>
-        <td class="num strong">${fmt(x.weekPts)}</td>
-      </tr>`)
-    .join('');
-
-  const players = r.best
-    ? `<div class="players">
-        <p><span class="tag">Player of the day</span><b>${esc(r.best.name)}</b> ${fmt(r.best.pts)} for ${esc(r.best.team)}</p>
-        <p><span class="tag">Dud of the day</span><b>${esc(r.worst.name)}</b> ${fmt(r.worst.pts)} for ${esc(r.worst.team)}</p>
-      </div>`
-    : '';
-
-  const sameWeek = r.week.id === m.week.id;
-  const rest = [...m.rows]
-    .sort((a, b) => b.odds - a.odds || a.projFinal - b.projFinal)
-    .map((x) => `<tr class="${x.id === m.loser?.id ? 'last' : ''}">
-        <th scope="row">${esc(x.name)}</th>
-        <td class="num">${x.gamesLeft}</td>
-        <td class="num">${x.playersLeft}</td>
-        <td class="num">${fmt(x.projFinal)}</td>
-        <td class="num strong">${pct(x.odds)}</td>
-      </tr>`)
-    .join('');
-
-  const switcher = m.recapLive
-    ? `<div class="seg" role="group" aria-label="Which day">
-        <button type="button" data-recap="live" aria-pressed="${Boolean(live)}">${esc(m.recapLive.label)}, so far</button>
-        <button type="button" data-recap="final" aria-pressed="${!live}">${esc(m.recap.label)}, final</button>
-      </div>`
-    : '';
-  return `${switcher}<h2 class="panel-title">${esc(r.label)}${live ? ' so far' : ''}</h2>
-    <p class="lede">${live ? 'Games are still being played, so these are points so far for' : 'Results for'} week ${r.week.id}, day ${r.dayNumber} of ${r.week.sps.length} (US date).</p>
-    <ul class="movers">${lines.join('')}</ul>
-    <div class="scroll"><table>
-      <thead><tr><th scope="col" class="num">Pos</th><th scope="col">Team</th><th scope="col" class="num">Day</th><th scope="col" class="num">Week</th></tr></thead>
-      <tbody>${table}</tbody>
-    </table></div>
-    ${players}
-    <h3 class="panel-sub">${sameWeek ? 'Rest of the week' : `Week ${m.week.id} outlook`}</h3>
-    <p class="lede">The rest of the week is simulated: today’s set lineup, then each team’s best players on later days. Injured players are discounted, healthy ones still sit out about 1 game in 12, and a close race stays close.</p>
-    <div class="scroll"><table>
-      <thead><tr><th scope="col">Team</th><th scope="col" class="num">Games</th><th scope="col" class="num">Players</th><th scope="col" class="num">Projected</th><th scope="col" class="num">Risk</th></tr></thead>
-      <tbody>${rest}</tbody>
-    </table></div>`;
-}
-
-function renderShame(m) {
-  const weeks = m.shame;
-  const needsLoad = state.ctx.source === 'roster' && !state.seasonLoaded && m.week.id > 1;
-  if (needsLoad && !weeks.length) {
-    return `<p class="empty">Past weeks are rebuilt from ESPN’s daily stats, one request per day.</p>
-      <button type="button" class="action" data-action="season">Load past weeks</button>`;
-  }
-  if (!weeks.length) return '<p class="empty">No finished weeks yet. The first punishment is decided after the last game of week 1.</p>';
-
-  const tally = new Map();
-  for (const w of weeks) for (const l of w.losers) tally.set(l.id, (tally.get(l.id) || 0) + 1);
-  const nameOf = (id) => state.ctx.league.teams.find((t) => t.id === id)?.name || `Team ${id}`;
-  const counts = [...tally].sort((a, b) => b[1] - a[1]).map(([id, n]) => `<li><b>${esc(nameOf(id))}</b><span>${n}</span></li>`).join('');
-  const list = weeks
-    .map((w) => `<li>
-        <p class="wk">Week ${w.week}<span>${esc(w.label)}</span></p>
-        <p class="who-lost">${esc(w.losers.map((l) => nameOf(l.id)).join(' and '))}</p>
-        <p class="sub">${fmt(w.losers[0].pts)} points${w.margin ? `, ${fmt(w.margin)} short of safety` : ''}. Top score ${fmt(w.top.pts)} by ${esc(nameOf(w.top.id))}.</p>
-      </li>`)
-    .join('');
-  const more = needsLoad ? '<button type="button" class="action" data-action="season">Load all past weeks</button>' : '';
-  return `<h2 class="panel-title">Punishments so far</h2>
-    <ol class="tally">${counts}</ol>
-    <ol class="shame">${list}</ol>${more}`;
+  if (!show.lastKey || show.lastKey !== route.path) window.scrollTo(0, 0);
+  show.lastKey = route.path;
 }
 
 function renderFoot(m) {
   const how = m.source === 'schedule' ? 'ESPN’s day-by-day team scores' : 'each day’s ESPN lineup and player stats';
   const weeks = m.weeksSource === 'espn' ? 'Weeks follow ESPN’s matchup periods.' : `Weeks run ${DAYS[m.weekStart]} to ${DAYS[(m.weekStart + 6) % 7]}, US Eastern time.`;
-  const refresh = state.src.kind === 'static' ? 'The data updates about hourly from a GitHub job; Refresh reloads the latest snapshot.' : 'Auto-refreshes hourly.';
+  const refresh = app.src.kind === 'static' ? 'The data updates about hourly from a GitHub job; Refresh reloads the latest snapshot.' : 'Auto-refreshes hourly.';
   let check = '<button type="button" class="link" data-action="check">Check against ESPN season totals</button>';
-  if (state.check) {
-    const bad = state.check.filter((c) => !c.ok);
+  if (app.check) {
+    const bad = app.check.filter((c) => !c.ok);
     check = bad.length
       ? `<p class="warn">${plural(bad.length, 'team')} don’t match ESPN’s season total: ${bad.map((b) => `${esc(b.name)} (ESPN ${fmt(b.espn)}, rebuilt ${fmt(b.ours)})`).join('; ')}. Try <a href="?source=roster">roster mode</a>.</p>`
-      : `<p class="ok">Every team’s rebuilt total matches ESPN’s season total${state.check.every((c) => c.basis === 'finished days') ? ' (ESPN counts finished days only, so today isn’t in it)' : ''}.</p>`;
+      : `<p class="ok">Every team’s rebuilt total matches ESPN’s season total${app.check.every((c) => c.basis === 'finished days') ? ' (ESPN counts finished days only, so today isn’t in it)' : ''}.</p>`;
   }
   return `<p>Weekly points are rebuilt from ${how}, so they start at 0 each week no matter what ESPN’s season total says. Dates are US game days. ${weeks} ${refresh}</p>${check}`;
 }
@@ -393,115 +271,60 @@ const SETUP = {
       <p>Reload this page when the run finishes.</p>`,
 };
 
+function hideChrome() {
+  $('mainnav').hidden = true;
+  $('subnav').hidden = true;
+  $('account').hidden = true;
+}
+
 function renderSetup(cfg, kind = cfg?.platform === 'local' ? 'local' : 'cloudflare') {
-  $('hero').innerHTML = `<div class="setup">
+  hideChrome();
+  $('view').innerHTML = `<div class="setup">
       <h2>${kind === 'snapshot' ? 'Waiting for the first data snapshot' : 'Connect your ESPN league'}</h2>
       ${SETUP[kind]}
       <p><a href="?demo">Preview with demo data</a></p>
     </div>`;
-  document.querySelector('.tabs').hidden = true;
-  for (const p of ['week', 'recap', 'shame', 'trade']) $(`panel-${p}`).hidden = true;
 }
 
 function renderError(err) {
   if (err.setup) return renderSetup(null, err.setup);
-  $('hero').innerHTML = `<div class="error" role="alert">
+  if (app.model) hideChrome();
+  $('view').innerHTML = `<div class="error" role="alert">
       <h2>Couldn’t load the league</h2>
       <p>${esc(err.message)}</p>
-      <button type="button" class="action" data-action="retry">Try again</button>
+      <button type="button" class="btn primary" data-action="retry">Try again</button>
     </div>`;
 }
 
-/* ---------- Game day times ---------- */
+/* ---------- Game-day scoreboard ---------- */
 
 // True/false once the live scoreboard covers today's slate, otherwise undefined (the clock decides).
 // A snapshot's numbers can be older than the scoreboard, so the snapshot keeps using the clock.
 function boardDone() {
-  if (!state.ctx || state.src?.kind === 'static') return undefined;
-  const info = dayInfo(state.ctx.pro, state.ctx.league.currentSP, Date.now(), state.board);
+  if (!app.ctx || app.src?.kind === 'static') return undefined;
+  const info = dayInfo(app.ctx.pro, app.ctx.league.currentSP, Date.now(), app.board);
   return info && !info.estimated ? info.state === 'done' : undefined;
-}
-
-const when = (ms) => `${localTime(ms, state.tz)} ${zoneName(ms, state.tz)}`;
-
-function dayLine(d, now, { next = false } = {}) {
-  const label = `${dayLabel(state.ctx.pro, d.sp)} (US)`;
-  const slate = `${plural(d.games, 'game')}, first game ${when(d.firstTip)}, likely finished by ${localTime(d.likelyEnd, state.tz)}.`;
-  const tag = d.estimated ? ' <span class="est">estimated</span>' : '';
-  if (next) return `<p><b>Next: ${esc(label)}:</b> ${esc(slate)}</p>`;
-  let status;
-  if (d.state === 'done') status = '<span class="chip done">Finished for the day</span>';
-  else if (d.state === 'live') {
-    const left = d.likelyEnd - now;
-    const progress = d.final == null ? '' : `${d.final} of ${d.games} games final. `;
-    status = `<span class="chip live">In progress</span> ${progress}${left > 0 ? `About ${duration(left)} to go.` : 'Should be wrapping up.'}`;
-  } else status = `<span class="chip soon">${d.firstTip - now > 60_000 ? `Starts in ${duration(d.firstTip - now)}` : 'Starting now'}</span>`;
-  return `<p><b>${esc(label)}</b> ${status}${tag}</p><p class="times">${d.state === 'done' ? `Played from ${when(d.firstTip)}.` : esc(slate)}</p>`;
-}
-
-function renderGameDay() {
-  const el = $('gameday');
-  if (!state.ctx || DEMO) return void (el.hidden = true);
-  const now = Date.now();
-  const { today, next } = gameDays(state.ctx.pro, state.ctx.league.currentSP, now, state.board);
-  const over = !today || today.state === 'done';
-  const parts = [today && dayLine(today, now), over && next && dayLine(next, now, { next: true })].filter(Boolean);
-  el.hidden = !parts.length;
-  el.innerHTML = parts.length ? `<h2 class="sr">Game day times, ${esc(state.tz.replace('_', ' '))}</h2>${parts.join('')}` : '';
 }
 
 // Ask ESPN's scoreboard how today's games are going. Quietly skipped if it can't be reached.
 async function refreshBoard() {
-  if (DEMO || !state.ctx) return;
-  const { league, pro } = state.ctx;
+  if (DEMO || !app.ctx) return;
+  const { league, pro } = app.ctx;
   const info = dayInfo(pro, league.currentSP, Date.now());
   const key = etDateKey(pro, league.currentSP);
   if (!info || !key || info.firstTip - Date.now() > 3 * HOUR) return; // nothing to watch yet
   const before = boardDone();
   // Through our own server when there is one (no browser restrictions), otherwise straight from ESPN
-  const viaServer = state.src?.kind === 'api' && !DEMO ? await fetchScoreboard(league.currentSP, key, () => fetch(`api/scoreboard?date=${key}`)) : null;
+  const viaServer = app.src?.kind === 'api' ? await fetchScoreboard(league.currentSP, key, () => fetch(`api/scoreboard?date=${key}`)) : null;
   const board = viaServer || (await fetchScoreboard(league.currentSP, key));
   if (!board) return;
-  state.board = board;
-  renderGameDay();
+  app.board = board;
+  if (pageFor(app.route).id === 'dashboard') show();
   // The day just finished: reload so the recap and standings use the final numbers
-  if (boardDone() === true && before !== true && state.src?.kind !== 'static') load({ fresh: true });
+  if (boardDone() === true && before !== true && app.src?.kind !== 'static') load({ fresh: true });
 }
 
-/* ---------- Tabs and actions ---------- */
-
-function showTab(tab, focus = true) {
-  state.tab = tab;
-  try { localStorage.setItem('pw:tab', tab); } catch {}
-  document.body.classList.toggle('wide', tab === 'trade'); // side-by-side rosters need room
-  if (tab !== 'trade') document.body.classList.remove('trading');
-  for (const btn of document.querySelectorAll('[role=tab]')) {
-    const on = btn.dataset.tab === tab;
-    btn.setAttribute('aria-selected', on);
-    btn.tabIndex = on ? 0 : -1;
-    if (on && focus) btn.focus();
-    $(btn.getAttribute('aria-controls')).hidden = !on;
-  }
-  if (tab === 'trade' && state.ctx) trade.render();
-}
-
-document.querySelector('.tabs').addEventListener('click', (e) => {
-  const btn = e.target.closest('[role=tab]');
-  if (btn) showTab(btn.dataset.tab);
-});
-document.querySelector('.tabs').addEventListener('keydown', (e) => {
-  const tabs = [...document.querySelectorAll('[role=tab]')];
-  const i = tabs.findIndex((t) => t.dataset.tab === state.tab);
-  if (e.key === 'ArrowRight') showTab(tabs[(i + 1) % tabs.length].dataset.tab);
-  if (e.key === 'ArrowLeft') showTab(tabs[(i + tabs.length - 1) % tabs.length].dataset.tab);
-});
-
-document.addEventListener('click', (e) => {
-  const view = e.target.closest('[data-recap]')?.dataset.recap;
-  if (!view || !state.model) return;
-  state.recapView = view;
-  $('panel-recap').innerHTML = renderRecap(state.model);
-});
+/* ---------- Events ---------- */
 
 document.addEventListener('click', async (e) => {
   const action = e.target.closest('[data-action]')?.dataset.action;
@@ -512,28 +335,29 @@ document.addEventListener('click', async (e) => {
   btn.textContent = 'Loading…';
   try {
     await loadSeason();
-    render();
+    show();
   } catch (err) {
     btn.textContent = `Couldn’t load: ${err.message}`;
   }
 });
 
+$('account').addEventListener('click', () => (location.hash = link('transactions', 'trade')));
+
 // A snapshot site checks for a new file every few minutes; a live site refreshes hourly.
-const interval = () => (state.src?.kind === 'static' ? STATIC_POLL : HOUR);
+const interval = () => (app.src?.kind === 'static' ? STATIC_POLL : HOUR);
 $('refresh').addEventListener('click', startRefresh);
 updateRefreshButton();
-setInterval(() => state.ctx && renderGameDay(), 60_000);
+setInterval(() => app.ctx && pageFor(app.route).id === 'dashboard' && show(), 60_000);
 setInterval(refreshBoard, BOARD_POLL);
 setInterval(() => {
-  if (Date.now() - state.tried >= interval() - 1000) load();
+  if (Date.now() - app.tried >= interval() - 1000) load();
 }, 60_000);
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && state.tried && Date.now() - state.tried > interval()) load();
+  if (document.visibilityState === 'visible' && app.tried && Date.now() - app.tried > interval()) load();
 });
 
-try {
-  const saved = location.hash.slice(1) || localStorage.getItem('pw:tab');
-  if (['week', 'recap', 'shame', 'trade'].includes(saved)) state.tab = saved;
-} catch {}
-
+onRoute((route) => {
+  app.route = route;
+  show();
+});
 load();

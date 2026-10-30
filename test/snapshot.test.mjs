@@ -29,7 +29,7 @@ const log1 = `${work}/calls1.log`;
 let r = build({ FAKE_ESPN_MODE: 'private' }, { log: log1 });
 assert.equal(r.status, 0, r.text);
 assert.match(r.text, /Totals check: every team/);
-for (const f of ['index.html', 'app.js', 'logic.js', 'pipeline.js', 'sources.js', 'styles.css', 'data/snapshot.json', '.nojekyll']) assert.ok(existsSync(`${work}/site/${f}`), f);
+for (const f of ['index.html', 'app.js', 'logic.js', 'pipeline.js', 'sources.js', 'css/tokens.css', 'ui/dom.js', 'pages/dashboard.js', 'data/snapshot.json', '.nojekyll']) assert.ok(existsSync(`${work}/site/${f}`), f);
 assert.ok(!existsSync(`${work}/site/.env`));
 
 // 2. No cookie value (or .env) appears anywhere in the published files or the cache

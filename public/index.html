@@ -4,44 +4,40 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Punishment Watch</title>
-  <meta name="description" content="Weekly fantasy basketball leaderboard that resets every Monday, with projections for who cops the punishment.">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><circle cx='32' cy='32' r='29' fill='%23d7612a'/><path d='M3 32h58M32 3v58M12 10c10 10 10 34 0 44M52 10c-10 10-10 34 0 44' stroke='%23231a12' stroke-width='3' fill='none'/></svg>">
+  <meta name="description" content="Fantasy basketball front office: weekly punishment odds, players, trades and league tools.">
+  <meta name="theme-color" content="#101216">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' fill='%23e8f02a'/><path d='M3 32h58M32 3v58M12 10c10 10 10 34 0 44M52 10c-10 10-10 34 0 44' stroke='%23101216' stroke-width='3' fill='none'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=Barlow:ital,wght@0,400;0,500;0,600;0,700;1,500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/shell.css">
+  <link rel="stylesheet" href="css/pages.css">
 </head>
 <body>
-  <header class="top">
-    <div class="brand">
-      <h1 id="league-name">Punishment Watch</h1>
-      <p id="week-label" class="sub"></p>
+  <header class="topbar">
+    <div class="topbar-in">
+      <div class="brand">
+        <span class="mark" aria-hidden="true">PW</span>
+        <div>
+          <h1 id="league-name">Punishment Watch</h1>
+          <span id="week-label" class="sub"></span>
+        </div>
+      </div>
+      <div class="top-tools">
+        <span id="updated" class="updated" aria-live="polite"></span>
+        <button id="account" type="button" class="acct" hidden></button>
+        <button id="refresh" type="button" class="btn">Refresh</button>
+      </div>
     </div>
-    <div class="refresh">
-      <button id="refresh" type="button">Refresh</button>
-      <p id="updated" class="sub" aria-live="polite"></p>
-    </div>
+    <nav id="mainnav" class="mainnav" aria-label="Main"></nav>
   </header>
+  <nav id="subnav" class="subnav" aria-label="Section" hidden><div class="subnav-in" id="subnav-in"></div></nav>
 
   <p id="banner" class="banner" hidden></p>
-
-  <main id="app">
-    <section id="hero" aria-live="polite"></section>
-    <section id="gameday" class="gameday" aria-label="Game day times" hidden></section>
-
-    <nav class="tabs" role="tablist" aria-label="Views">
-      <button role="tab" id="tab-week" aria-controls="panel-week" aria-selected="true" data-tab="week">This week</button>
-      <button role="tab" id="tab-recap" aria-controls="panel-recap" aria-selected="false" data-tab="recap" tabindex="-1">Day recap</button>
-      <button role="tab" id="tab-shame" aria-controls="panel-shame" aria-selected="false" data-tab="shame" tabindex="-1">Shame</button>
-      <button role="tab" id="tab-trade" aria-controls="panel-trade" aria-selected="false" data-tab="trade" tabindex="-1">Trade</button>
-    </nav>
-
-    <section id="panel-week" role="tabpanel" aria-labelledby="tab-week"></section>
-    <section id="panel-recap" role="tabpanel" aria-labelledby="tab-recap" hidden></section>
-    <section id="panel-shame" role="tabpanel" aria-labelledby="tab-shame" hidden></section>
-    <section id="panel-trade" role="tabpanel" aria-labelledby="tab-trade" hidden></section>
-  </main>
-
+  <main id="view" class="frame" aria-live="polite"><p class="loading">Loading league…</p></main>
   <footer id="foot" class="foot"></footer>
 
   <script type="module" src="app.js"></script>

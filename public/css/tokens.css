@@ -1,0 +1,38 @@
+/* Design tokens. One place for colour, type, spacing, so every page looks like the same product. */
+:root {
+  /* surfaces */
+  --bg: #101216;
+  --bg-2: #181c23;
+  --panel: #202630;
+  --table: #171b22;
+  --table-head: #12151b;
+  --table-row-hover: #1d232c;
+  /* accent: selection, active navigation, key numbers, progress, primary actions, focus */
+  --accent: #e8f02a;
+  --accent-2: #c8d51e;
+  --on-accent: #101216;
+  /* text */
+  --text: #f5f6f7;
+  --text-2: #a0a7b2;
+  --muted: #69717d;
+  /* lines */
+  --line: #303741;
+  --line-soft: #20262f;
+  /* signals (restrained) */
+  --pos: #52b788;
+  --neg: #d9625a;
+  --warn: #d9a441;
+  /* type */
+  --font-head: 'Barlow Condensed', 'Roboto Condensed', 'Arial Narrow', 'Helvetica Neue', Arial, sans-serif;
+  --font-body: 'Inter', 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  /* space and shape */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --radius: 2px;
+  --nav-h: 44px;
+  --top-h: 52px;
+  --ease: 140ms ease;
+}
