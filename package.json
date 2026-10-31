@@ -15,7 +15,7 @@
     "score-trades": "node scripts/score-trades.mjs",
     "check:cloudflare": "node scripts/check-cloudflare.mjs",
     "pins": "node scripts/make-pins.mjs",
-    "test": "node test/logic.test.mjs && node test/real.test.mjs && node test/api.test.mjs && node test/snapshot.test.mjs && node test/dashboard.test.mjs && node test/trade.test.mjs && node test/scorecard.test.mjs && node test/server.test.mjs && node test/suggest.test.mjs && node test/projection.test.mjs && node test/meters.test.mjs && node test/lineup.test.mjs && node test/players.test.mjs && node test/standings.test.mjs && node test/activity.test.mjs && node test/schedule.test.mjs && node test/analytics.test.mjs && node test/theme.test.mjs && node test/wishlose.test.mjs",
+    "test": "node test/logic.test.mjs && node test/real.test.mjs && node test/api.test.mjs && node test/snapshot.test.mjs && node test/dashboard.test.mjs && node test/trade.test.mjs && node test/scorecard.test.mjs && node test/server.test.mjs && node test/suggest.test.mjs && node test/projection.test.mjs && node test/meters.test.mjs && node test/lineup.test.mjs && node test/players.test.mjs && node test/standings.test.mjs && node test/activity.test.mjs && node test/schedule.test.mjs && node test/analytics.test.mjs && node test/theme.test.mjs && node test/wishlose.test.mjs && node test/dayplan.test.mjs",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "build:dashboard": "node scripts/build-dashboard.mjs"

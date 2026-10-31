@@ -314,3 +314,9 @@ a.btn { text-decoration: none; }
 }
 @media (max-width: 760px) { .team-hero { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 700px) { .slots .slot.extra { display: none; } } /* one empty slot is enough on a phone */
+
+/* ---- my team: day navigator ---- */
+.daynav { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; background: var(--bg-2); border: 1px solid var(--line); }
+.daynav-l { flex: 1; min-width: 150px; text-align: center; font: 700 18px/1 var(--font-head); letter-spacing: 0.06em; text-transform: uppercase; }
+.daynav-l small { color: var(--text-2); font: 500 11px/1 var(--font-body); letter-spacing: 0.04em; text-transform: none; }
+@media (max-width: 700px) { .daynav .btn { flex: 1 1 40%; } .daynav-l { order: -1; flex-basis: 100%; } }

@@ -380,7 +380,8 @@ $('account').addEventListener('click', () => (location.hash = link('team')));
 const interval = () => (app.src?.kind === 'static' ? STATIC_POLL : HOUR);
 $('refresh').addEventListener('click', startRefresh);
 updateRefreshButton();
-setInterval(() => app.ctx && pageFor(app.route).id === 'dashboard' && show(), 60_000);
+// The dashboard and My Team follow the clock (My Team moves to the next day once today's games are done)
+setInterval(() => app.ctx && ['dashboard', 'team'].includes(pageFor(app.route).id) && show(), 60_000);
 setInterval(refreshBoard, BOARD_POLL);
 setInterval(() => {
   if (Date.now() - app.tried >= interval() - 1000) load();
