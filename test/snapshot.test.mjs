@@ -16,7 +16,7 @@ const SWID = '{11111111-2222-3333-4444-555555555555}';
 const base = { LEAGUE_ID: '424242', SEASON: '2027', ESPN_S2: S2, ESPN_SWID: SWID };
 
 function build(extra = {}, { out = `${work}/site`, cache = `${work}/cache.json`, log } = {}) {
-  const env = { PATH: process.env.PATH, HOME: process.env.HOME, PW_ENV_FILE: `${work}/no-such.env`, ...base, ...extra, ...(log ? { FAKE_ESPN_LOG: log } : {}) };
+  const env = { PATH: process.env.PATH, HOME: process.env.HOME, PW_ENV_FILE: `${work}/no-such.env`, HIDE_TEAMS: '', ...base, ...extra, ...(log ? { FAKE_ESPN_LOG: log } : {}) };
   for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k];
   const r = spawnSync(process.execPath, ['--import', `${root}test/fake-espn-register.mjs`, `${root}scripts/build-snapshot.mjs`, '--out', out, '--cache', cache], { env, encoding: 'utf8', cwd: work });
   return { ...r, text: `${r.stdout}${r.stderr}` };

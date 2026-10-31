@@ -36,9 +36,9 @@ jobs:
       - name: Build site and data snapshot
         run: node scripts/build-snapshot.mjs --out _site
         env:
-          LEAGUE_ID: ${{ vars.LEAGUE_ID }}
+          LEAGUE_ID: ${{ vars.LEAGUE_ID || '823721722' }}
           SEASON: ${{ vars.SEASON }}
-          HIDE_TEAMS: ${{ vars.HIDE_TEAMS }}
+          HIDE_TEAMS: ${{ vars.HIDE_TEAMS || '3' }}
           WEEK_START: ${{ vars.WEEK_START }}
           TIMEZONE: ${{ vars.TIMEZONE }}
           ESPN_S2: ${{ secrets.ESPN_S2 }}

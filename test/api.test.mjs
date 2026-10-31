@@ -5,7 +5,7 @@ import { installFakeEspn } from './fake-espn.mjs';
 
 const ctx = { waitUntil() {} };
 const get = async (path, env) => {
-  const res = await handleApi(new Request(`http://local${path}`), { LEAGUE_ID: '424242', SEASON: '2027', REFRESH_SECONDS: '0', ...env }, ctx);
+  const res = await handleApi(new Request(`http://local${path}`), { LEAGUE_ID: '424242', SEASON: '2027', REFRESH_SECONDS: '0', HIDE_TEAMS: '', ...env }, ctx);
   return { res, body: await res.json().catch(() => null) };
 };
 const LEAGUE = '/api/league?view=mTeam&view=mRoster';
@@ -106,6 +106,18 @@ fake.restore();
   assert.equal(signed.body.verified, true);
   assert.deepEqual(Object.keys((await read({})).accepted).sort(), ['1', '2']);
   rmSync(kvFile, { force: true });
+}
+
+// This league is built in: no setup needed, and setting a value (even blank) overrides it
+{
+  const bare = async (env) => (await (await handleApi(new Request('http://local/api/config'), env, ctx)).json());
+  const d = await bare({});
+  assert.equal(d.configured, true);
+  assert.equal(d.leagueId, '823721722');
+  assert.deepEqual(d.hideTeams, ['3']);
+  assert.deepEqual((await bare({ LEAGUE_ID: '555', HIDE_TEAMS: '' })).hideTeams, [], 'a blank value hides nobody');
+  assert.equal((await bare({ LEAGUE_ID: '555' })).leagueId, '555');
+  assert.equal((await bare({ LEAGUE_ID: '' })).configured, false);
 }
 
 // Config never leaks cookie values

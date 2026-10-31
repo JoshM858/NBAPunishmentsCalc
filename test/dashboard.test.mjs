@@ -13,7 +13,7 @@ const built = spawnSync(process.execPath, [`${root}scripts/build-dashboard.mjs`,
 assert.equal(built.status, 0, built.stderr);
 
 const worker = (await import(pathToFileURL(out))).default;
-const env = { LEAGUE_ID: '424242', SEASON: '2027' };
+const env = { LEAGUE_ID: '424242', SEASON: '2027', HIDE_TEAMS: '' };
 const ctx = { waitUntil() {} };
 const fake = installFakeEspn();
 const hit = (path) => worker.fetch(new Request(`https://example.workers.dev${path}`), env, ctx);

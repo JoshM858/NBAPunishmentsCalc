@@ -1,5 +1,6 @@
 // Minimal .env reader (KEY=VALUE lines) so the local server needs no dependencies.
 import { readFileSync } from 'node:fs';
+import { DEFAULTS } from './api.js';
 
 export function parseEnv(text) {
   const out = {};
@@ -26,6 +27,7 @@ export function loadEnv(file = process.env.PW_ENV_FILE || new URL('../.env', imp
   }
   const keys = ['LEAGUE_ID', 'SEASON', 'ESPN_S2', 'ESPN_SWID', 'HIDE_TEAMS', 'WEEK_START', 'TIMEZONE', 'TEAM_PINS', 'SESSION_SECRET', 'REFRESH_SECONDS', 'PORT', 'HOST'];
   const env = { ...fromFile };
-  for (const k of keys) if (process.env[k]) env[k] = process.env[k];
+  for (const k of keys) if (process.env[k] !== undefined) env[k] = process.env[k];
+  for (const [k, v] of Object.entries(DEFAULTS)) if (env[k] === undefined) env[k] = v; // this league, unless set
   return { env, hasFile: Object.keys(fromFile).length > 0 };
 }

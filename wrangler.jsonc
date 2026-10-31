@@ -10,11 +10,11 @@
   },
   "vars": {
     // Number after leagueId= in your ESPN league URL
-    "LEAGUE_ID": "",
+    "LEAGUE_ID": "823721722",
     // ESPN names NBA seasons by the year they end: 2026-27 = 2027
     "SEASON": "2027",
     // Optional: comma-separated team IDs, abbreviations or names to leave off the board
-    "HIDE_TEAMS": "",
+    "HIDE_TEAMS": "3",
     // Day your weeks start in US Eastern time (Tuesday: weeks run Tuesday to Monday)
     "WEEK_START": "Tuesday",
     // Time zone for game start and finish times (Victoria = Australia/Melbourne)

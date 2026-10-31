@@ -3,6 +3,8 @@
 // league viewable to the public. Responses are streamed without parsing to stay under the free
 // Cloudflare plan's 10 ms CPU limit.
 
+// This league, so nobody has to type it in. Setting LEAGUE_ID or HIDE_TEAMS (even to blank, which hides nobody) overrides these.
+export const DEFAULTS = { LEAGUE_ID: '823721722', HIDE_TEAMS: '3' };
 const ESPN = 'https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons';
 const VIEWS = new Set(['mSettings', 'mTeam', 'mRoster', 'mMatchup', 'mMatchupScore', 'mStatus', 'mScoreboard', 'mStandings', 'mTransactions2', 'mDraftDetail']);
 const LIVE_TTL = 90;
@@ -63,7 +65,7 @@ async function handle(request, env, ctx, state) {
   const allowed = signIn ? ['POST'] : board || accept ? ['GET', 'POST'] : ['GET'];
   if (!allowed.includes(request.method)) return json({ error: signIn ? 'Use POST to sign in.' : 'Only GET is supported.' }, 405);
   const season = Number(env.SEASON) || defaultSeason();
-  const leagueId = String(env.LEAGUE_ID || '').trim();
+  const leagueId = String(env.LEAGUE_ID ?? DEFAULTS.LEAGUE_ID).trim();
   const cookie = cookieHeader(env);
   const refreshSeconds = env.REFRESH_SECONDS == null || env.REFRESH_SECONDS === '' ? 5 : Number(env.REFRESH_SECONDS);
   // true when this request may bypass the cache (it asked for fresh data and is within its allowance)
@@ -88,7 +90,7 @@ async function handle(request, env, ctx, state) {
         weekStart: env.WEEK_START || null,
         timezone: env.TIMEZONE || null,
         pins: pinsOf(env).size > 0, // whether team PINs are switched on; the PINs themselves never leave the server
-        hideTeams: String(env.HIDE_TEAMS || '').split(',').map((s) => s.trim()).filter(Boolean),
+        hideTeams: String(env.HIDE_TEAMS ?? DEFAULTS.HIDE_TEAMS).split(',').map((s) => s.trim()).filter(Boolean),
       });
     }
 

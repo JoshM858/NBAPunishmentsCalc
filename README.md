@@ -26,6 +26,8 @@ There are three ways to run it. They share the same page and the same scoring co
 
 ## Get your league ID, season and cookies
 
+**For this league you can skip this:** the league ID (823721722) and hiding team 3 are built in, so there is nothing to type on the PC, Cloudflare or GitHub versions. Set `LEAGUE_ID` or `HIDE_TEAMS` only to change them (a blank `HIDE_TEAMS` hides nobody). Cookies are still needed only if the league becomes private.
+
 - **`LEAGUE_ID`**: open your league on fantasy.espn.com. The link looks like `.../basketball/league?leagueId=12345678`. The number is the ID.
 - **`SEASON`**: ESPN names NBA seasons by the year they end, so 2026-27 is `2027`.
 - **Cookies** (skip if the league is viewable to the public): on a computer where you're logged in to fantasy.espn.com, press F12, then **Application** (Chrome/Edge) or **Storage** (Firefox), then **Cookies**, then `https://fantasy.espn.com`. Copy the values of `espn_s2` (a very long string) and `SWID` (looks like `{XXXXXXXX-XXXX-...}`, keep the braces). Paste them as they are, URL-encoded characters and all.
