@@ -2,7 +2,7 @@
 // Accepting is written to the server's record (append-only, with the time, so nobody can back out) and cannot be
 // undone from the site. There is no decline or close button. Without server storage (GitHub Pages) it falls back to
 // a flag in this browser.
-import { openLegal } from './legal.js';
+import { openLegal, termsHash } from './legal.js';
 import { esc } from './dom.js';
 import { focusPin, signInClick, signInHtml, signInSubmit } from './signin.js';
 
@@ -83,7 +83,7 @@ export function openAgreement(app, { onDone = () => {} } = {}) {
     try {
       const rec = app.src?.kind === 'api' ? await fetchRecord() : null;
       if (rec?.enabled) {
-        const res = await fetch('api/accept', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamId: team.id, version: rec.version }) });
+        const res = await fetch('api/accept', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamId: team.id, version: rec.version, termsHash: await termsHash() }) });
         const out = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(out.error || 'Couldn’t record that. Try again.');
       }

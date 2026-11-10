@@ -102,13 +102,23 @@ export default {
       const rec = app.src.kind === 'api' ? await fetchRecord() : null;
       if (app.route !== route) return;
       const when = (ms) => new Date(ms).toLocaleString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: app.tz });
+      const owed = new Map();
+      for (const w of app.model.shame) for (const l of w.losers) owed.set(l.id, (owed.get(l.id) || 0) + 1);
       const rows = app.ctx.league.teams.map((t) => {
         const a = rec?.accepted?.[t.id];
-        return `<tr><th scope="row"><div class="who-cell"><b>${esc(t.name)}</b><small>${esc(t.owner || '')}</small></div></th><td>${a ? `<span class="badge good">Accepted</span>` : '<span class="badge bad">Not yet</span>'}</td><td>${a ? esc(when(a.at)) : '–'}</td><td>${a ? (a.verified ? 'PIN-verified' : 'Not PIN-verified') : ''}</td></tr>`;
+        return `<tr><th scope="row"><div class="who-cell"><b>${esc(t.name)}</b><small>${esc(t.owner || '')}</small></div></th><td>${a ? `<span class="badge good">Accepted</span>` : '<span class="badge bad">Not yet</span>'}</td><td>${a ? esc(when(a.at)) : '–'}</td><td>${a ? (a.verified ? 'PIN-verified' : 'Not PIN-verified') : ''}</td><td class="num strong">${owed.get(t.id) || 0}</td></tr>`;
       }).join('');
       el.innerHTML = panel('Terms and Conditions record', rec?.enabled
-        ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Team</th><th>Status</th><th>Accepted at (${esc(app.tz.replace('_', ' '))})</th><th>Check</th></tr></thead><tbody>${rows}</tbody></table></div><p class="note" style="padding:12px 16px">Each acceptance is saved on the server with the team, the time, the terms version and the browser, and cannot be removed through the site. “PIN-verified” means the team signed in with its PIN when accepting; turn on team PINs so every record is verified.</p>`
+        ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Team</th><th>Status</th><th>Accepted at (${esc(app.tz.replace('_', ' '))})</th><th>Check</th><th class="num" title="Weeks this team has finished last">Punishments owed</th></tr></thead><tbody>${rows}</tbody></table></div><p class="note" style="padding:12px 16px">Each acceptance is saved on the server with the team, the time, the terms version and the browser, and cannot be removed through the site. <button type=\"button\" class=\"link\" data-csv>Download the record (CSV)</button> and keep a copy. “PIN-verified” means the team signed in with its PIN when accepting; turn on team PINs so every record is verified.</p>`
         : '<p class="empty">The record is saved on the server, so it needs the Cloudflare or PC version with storage switched on (README, Trade block).</p>', { cls: 'flush' });
+      el.onclick = (e) => {
+        if (!e.target.closest('[data-csv]')) return;
+        const lines = [['team', 'owner', 'accepted_at_utc', 'terms_version', 'pin_verified', 'terms_hash', 'punishments_owed'], ...app.ctx.league.teams.map((t) => { const a = rec?.accepted?.[t.id]; return [t.name, t.owner || '', a ? new Date(a.at).toISOString() : '', a?.version ?? '', a ? a.verified : '', a?.termsHash || '', owed.get(t.id) || 0]; })];
+        const csv = lines.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+        const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `terms-record-${new Date().toISOString().slice(0, 10)}.csv` });
+        a.click();
+        URL.revokeObjectURL(a.href);
+      };
       return;
     }
     if (route.tab === 'draft') {

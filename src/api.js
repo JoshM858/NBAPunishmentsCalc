@@ -423,7 +423,7 @@ async function saveAcceptance(request, env, leagueId) {
   const key = acceptKey(leagueId, teamId);
   const old = await env.BOARD.get(key);
   if (old && JSON.parse(old).version === TERMS_VERSION) return json(JSON.parse(old)); // already on record: keep the original time
-  const record = { teamId, version: TERMS_VERSION, at: Date.now(), verified, agent: String(request.headers.get('user-agent') || '').slice(0, 120), network: await shortHash(request.headers.get('cf-connecting-ip') || request.headers.get('x-real-ip') || '') };
+  const record = { teamId, version: TERMS_VERSION, at: Date.now(), verified, termsHash: /^[0-9a-f]{64}$/.test(String(body.termsHash)) ? body.termsHash : null, agent: String(request.headers.get('user-agent') || '').slice(0, 120), network: await shortHash(request.headers.get('cf-connecting-ip') || request.headers.get('x-real-ip') || '') };
   await env.BOARD.put(key, JSON.stringify(record));
   return json(record);
 }

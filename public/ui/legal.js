@@ -21,6 +21,13 @@ const DOCS = {
     <p>The site uses browser storage (not tracking cookies) for the items listed in the Privacy policy. The only cookie is <code>pw_team</code>, set only when team PINs are on, marked HttpOnly, and used only to know which team you are.</p>`],
 };
 
+// A fingerprint of the exact Terms wording shown, saved with each acceptance as proof of what was agreed to
+export async function termsHash() {
+  const text = DOCS.terms[1].replace(/\s+/g, ' ').trim();
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 export function openLegal(which = 'terms') {
   document.getElementById('legal-modal')?.remove();
   const root = document.createElement('div');
