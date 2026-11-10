@@ -391,8 +391,22 @@ assert.equal(m.weeksSource, 'espn');
   // Today: only the lineup as set counts; a benched player isn't started today but is picked on later days
   const bench = projectTeam(roster(player(1, 40, { slot: 12 })), opts);
   assert.equal(bench.games, 3);
-  // Games already started are excluded (their points are in the total)
-  assert.equal(projectTeam(roster(player(1, 40)), { ...opts, now: 10e6 + 1 }).games, 3);
+  // A game in progress still has its remaining part to come; one that is over adds nothing (its points are in the total)
+  const tip = 10e6;
+  const playing = player(1, 40, { bySP: { 10: 5 } }); // points on the board: he is playing
+  const startedJustNow = projectTeam(roster(playing), { ...opts, now: tip + 1 });
+  assert.equal(startedJustNow.games, 4, 'the game in progress counts as a game left');
+  assert.ok(startedJustNow.mean > healthy.mean * 0.97 - 1, 'almost the whole game is still to come');
+  const halfway = projectTeam(roster(playing), { ...opts, now: tip + (MODEL.gameMinutes / 2) * 60_000 });
+  assert.ok(halfway.mean < startedJustNow.mean - 40 * 0.4 && halfway.mean > startedJustNow.mean - 40 * 0.6, `halfway through: ${startedJustNow.mean} -> ${halfway.mean}`);
+  const over = projectTeam(roster(playing), { ...opts, now: tip + (MODEL.gameMinutes + 1) * 60_000 });
+  assert.equal(over.games, 3, 'a finished game adds nothing');
+  assert.ok(over.mean < halfway.mean);
+  // A benched player's game in progress adds nothing, and a player already scoring is surely playing
+  assert.equal(projectTeam(roster(player(1, 40, { slot: 12 })), { ...opts, now: tip + 1 }).games, 3);
+  const scoring = projectTeam(roster(player(1, 40, { bySP: { 10: 12 } })), { ...opts, now: tip + 60 * 60_000 });
+  const silent = projectTeam(roster(player(1, 40)), { ...opts, now: tip + 60 * 60_000 });
+  assert.ok(scoring.mean > silent.mean, 'a player with points on the board is not a likely DNP');
 
   // Only `activeSlots` players start on a later day (today uses the lineup as set, and these are all benched)
   const many = projectTeam(roster(...Array.from({ length: 12 }, (_, i) => player(i, 30 + i, { slot: 12 }))), { ...opts, currentSP: 11, activeSlots: 3 });

@@ -449,6 +449,7 @@ export const MODEL = {
   outPersist: 0.9, // same, for a player ESPN lists as out
   levelSd: 0.2, // uncertainty in a player's true average before any games (shrinks as games are played)
   levelFloor: 0.05, // role and usage can change, whatever the sample
+  gameMinutes: 150, // tip-off to final buzzer, to work out how much of a game in progress is left
   later: 0.97, // days not yet set: managers miss slots, positions don't line up
   returnMiss: 0.4, // chance a player misses his first game back from an injury (an assumption: not testable yet)
   teamSd: 0.07, // how well a manager sets lineups all week (teams scored 85-96% of their best lineup)
@@ -495,7 +496,17 @@ export function projectTeam(team, { week, currentSP, pro, now, activeSlots }) {
     const games = [];
     for (const sp of days) {
       const g = pro.games.get(p.proTeamId)?.get(sp);
-      if (!g || (sp === currentSP && g.date <= now)) continue; // no game, or already played (its points are in the total)
+      if (!g) continue;
+      // A game in progress: the points so far are in the total, and the rest of the game is still to come
+      // (the share of the game left, from the clock). One already over (its points are in the total) adds nothing.
+      if (sp === currentSP && g.date <= now) {
+        const left = 1 - (now - g.date) / (MODEL.gameMinutes * 60_000);
+        if (left <= 0 || p.slot > ACTIVE_MAX_SLOT || missChance(p.injury) >= 1) continue; // bench and out players score nothing
+        const scored = p.bySP?.[currentSP] ?? 0; // already scoring means he is playing; a zero this far in is more likely a sit
+        games.push({ sp, miss: Math.min(0.95, scored > 0 ? 0 : Math.max(missChance(p.injury), MODEL.base) + (left < 0.7 ? 0.4 : 0)), partial: left, picked: false, today: true });
+        anchored = false;
+        continue;
+      }
       if (dated && spDay(pro, sp) < p.returnMs) {
         games.push({ sp, miss: 1, forced: true, picked: false, today: false });
         miss = MODEL.returnMiss;
@@ -525,10 +536,10 @@ export function projectTeam(team, { week, currentSP, pro, now, activeSlots }) {
   const plan = [];
   for (const c of cands) {
     if (!c.games.some((g) => g.picked)) continue;
-    plan.push({ mu: c.mu, levelSd: levelSd(c.p.seasonGP), persist: c.persist, games: c.games.map((g) => ({ ...g, w: g.sp === currentSP ? 1 : MODEL.later })) });
+    plan.push({ mu: c.mu, levelSd: levelSd(c.p.seasonGP), persist: c.persist, games: c.games.map((g) => ({ ...g, w: g.partial ?? (g.sp === currentSP ? 1 : MODEL.later) })) });
     for (const g of c.games) {
       if (!g.picked) continue;
-      mean += c.mu * (1 - g.miss) * (g.sp === currentSP ? 1 : MODEL.later);
+      mean += c.mu * (1 - g.miss) * (g.partial ?? (g.sp === currentSP ? 1 : MODEL.later));
       if (g.miss < 0.5) {
         games += 1; // "games left" counts games he is likely to play; a long shot still adds to the mean
         players.add(c.p.playerId);
