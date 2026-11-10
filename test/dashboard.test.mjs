@@ -12,7 +12,10 @@ mkdirSync(`${root}.cache/dashboard-test`, { recursive: true });
 const built = spawnSync(process.execPath, [`${root}scripts/build-dashboard.mjs`, out], { encoding: 'utf8' });
 assert.equal(built.status, 0, built.stderr);
 
-const worker = (await import(pathToFileURL(out))).default;
+// Cloudflare refuses a Worker module that exports anything but its handlers (this broke the pasted file once)
+const exported = (await import(pathToFileURL(out)));
+assert.deepEqual(Object.keys(exported), ['default'], 'the bundle exports only the default handler');
+const worker = exported.default;
 const env = { LEAGUE_ID: '424242', SEASON: '2027', HIDE_TEAMS: '' };
 const ctx = { waitUntil() {} };
 const fake = installFakeEspn();

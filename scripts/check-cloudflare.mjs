@@ -105,7 +105,7 @@ async function run(label, port, configArgs) {
 
     // The trade block: stored in the BOARD KV namespace, readable by all, writable only by the signed-in team
     const board = JSON.parse((await get('/api/board')).text);
-    check(board.enabled === true && board.canEdit === false, 'the trade block is on (KV bound) and read-only when signed out');
+    check(board.enabled === true && board.canEdit === false, 'the trade block is on (KV or D1 bound) and read-only when signed out');
     const post = (cookie, body) => fetch(`http://127.0.0.1:${port}/api/board`, { method: 'POST', headers: { cookie: cookie || '', 'content-type': 'application/json' }, body: JSON.stringify(body) });
     check((await post('', { untouchables: [1] })).status === 401, 'saving the trade block needs a PIN sign-in');
     const mine = setCookie.split(';')[0];
@@ -114,7 +114,7 @@ async function run(label, port, configArgs) {
     check(saved.status === 200 && rec.teamId === 1, 'a signed-in team saves its own lists, whatever team the request names');
     check(JSON.stringify(rec.block) === '[1]' && rec.untouchables[0] === 2 && JSON.stringify(rec.positions) === '["PG"]' && rec.note === 'hello world', 'the lists are cleaned (no repeats between block and untouchables, valid positions, tidy note)');
     const readBack = await (await fetch(`http://127.0.0.1:${port}/api/board`, { headers: { cookie: mine } })).json();
-    check(readBack.canEdit === true && readBack.teams['1']?.targets?.[0] === 5104157, 'the saved lists read back from KV');
+    check(readBack.canEdit === true && readBack.teams['1']?.targets?.[0] === 5104157, 'the saved lists read back from the store');
   } finally {
     child.kill('SIGTERM');
     await new Promise((r) => setTimeout(r, 500));
@@ -129,7 +129,7 @@ writeFileSync(`${root}.cache/wrangler-bundle.jsonc`, JSON.stringify({ name: 'bun
 const deploy = JSON.parse(readFileSync(`${root}wrangler.jsonc`, 'utf8').replace(/^\s*\/\/.*$/gm, ''));
 deploy.main = `${root}${deploy.main}`;
 deploy.assets = { ...deploy.assets, directory: `${root}public` };
-deploy.kv_namespaces = kv;
+deploy.d1_databases = [{ binding: 'DB', database_name: 'check', database_id: 'local-check-db' }]; // this run stores in D1 instead of KV
 writeFileSync(`${root}.cache/wrangler-deploy-check.json`, JSON.stringify(deploy));
 await run('The single file you paste into the Cloudflare dashboard (dist/worker-dashboard.js)', 8811, ['-c', `${root}.cache/wrangler-bundle.jsonc`]);
 await run('The Wrangler deploy (wrangler.jsonc: src/worker.js serving public/)', 8812, ['-c', `${root}.cache/wrangler-deploy-check.json`]);

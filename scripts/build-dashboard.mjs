@@ -18,7 +18,8 @@ const files = Object.fromEntries(
 );
 // Images go in as base64 text and are decoded when served
 const images = Object.fromEntries(walk('').filter((f) => binary[f.split('.').pop()]).map((f) => [`/${f}`, [binary[f.split('.').pop()], readFileSync(new URL(`public/${f}`, root)).toString('base64')]]));
-const api = read('src/api.js').replace('export async function handleApi', 'async function handleApi');
+// A Worker module may only export its handlers, so drop `export` from everything in api.js (DEFAULTS, TERMS_VERSION, handleApi)
+const api = read('src/api.js').replace(/^export (async function|function|const)/gm, '$1');
 
 const out = `// Punishment Watch — single-file Worker for the Cloudflare dashboard.
 // Paste this whole file into the Worker's code editor and deploy.

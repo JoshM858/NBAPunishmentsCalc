@@ -10,7 +10,7 @@
 // Cloudflare plan's 10 ms CPU limit.
 
 // This league, so nobody has to type it in. Setting LEAGUE_ID or HIDE_TEAMS (even to blank, which hides nobody) overrides these.
-export const DEFAULTS = { LEAGUE_ID: '823721722', HIDE_TEAMS: '3' };
+const DEFAULTS = { LEAGUE_ID: '823721722', HIDE_TEAMS: '3' };
 const ESPN = 'https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons';
 const VIEWS = new Set(['mSettings', 'mTeam', 'mRoster', 'mMatchup', 'mMatchupScore', 'mStatus', 'mScoreboard', 'mStandings', 'mTransactions2', 'mDraftDetail']);
 const LIVE_TTL = 90;
@@ -55,6 +55,7 @@ function defaultSeason(now = new Date()) {
 // per signed-in team, or per device when nobody is signed in. Over the limit it is not an error: the request is
 // answered from the cache, which is at most a minute or two old, and the response says so (x-refresh-limited).
 async function handleApi(request, env, ctx) {
+  env = withStore(env);
   const state = { limited: false };
   const route = new URL(request.url).pathname;
   const over = await overBudget(env, route);
@@ -394,6 +395,40 @@ async function refreshLimited(request, env, route, seconds) {
   return false;
 }
 
+/* ---------- Storage: KV (BOARD) or D1 (DB) ---------- */
+
+// The trade block and the Terms record need a small key-value store. A KV namespace bound as BOARD works; so does a D1
+// database bound as DB (one table, created on first use). D1 reads are strongly consistent, which suits the Terms
+// record better than KV's "up to a minute" delay. If both are bound, BOARD wins.
+const ready = new WeakMap();
+function d1Store(db) {
+  const init = () => {
+    if (!ready.has(db)) ready.set(db, db.exec('CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL, t INTEGER)'));
+    return ready.get(db);
+  };
+  return {
+    async get(k) {
+      await init();
+      return (await db.prepare('SELECT v FROM kv WHERE k = ?').bind(k).first('v')) ?? null;
+    },
+    async put(k, v) {
+      await init();
+      await db.prepare('INSERT INTO kv (k, v, t) VALUES (?, ?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v, t = excluded.t').bind(k, v, Date.now()).run();
+    },
+    async list({ prefix = '' } = {}) {
+      await init();
+      const { results } = await db.prepare("SELECT k FROM kv WHERE k LIKE ? ESCAPE '\\'").bind(`${prefix.replace(/[\\%_]/g, '\\$&')}%`).all();
+      return { keys: (results || []).map((r) => ({ name: r.k })) };
+    },
+  };
+}
+const stores = new WeakMap();
+function withStore(env) {
+  if (env.BOARD || !env.DB?.prepare) return env;
+  if (!stores.has(env.DB)) stores.set(env.DB, d1Store(env.DB));
+  return { ...env, BOARD: stores.get(env.DB) };
+}
+
 /* ---------- Trade block ---------- */
 
 const BOARD_LIMITS = { block: 10, targets: 10, untouchables: 3, positions: 5, note: 140 };
@@ -455,7 +490,7 @@ async function saveBoard(request, env, leagueId) {
 
 /* ---------- Terms record ---------- */
 
-export const TERMS_VERSION = 2; // raise when the terms change: everyone is asked to accept again
+const TERMS_VERSION = 2; // raise when the terms change: everyone is asked to accept again
 const acceptKey = (leagueId, teamId) => `accept:${leagueId}:${teamId}`;
 
 async function readAcceptances(env, leagueId) {

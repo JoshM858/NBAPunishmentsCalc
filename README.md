@@ -171,6 +171,7 @@ The lists need somewhere to be stored:
 
 - **PC version**: works as is (saved in `.data/board.json`, git-ignored). With no PINs, any team can be edited from the PC version because only your own computer can reach it.
 - **Cloudflare**: create a KV namespace and bind it to the Worker as `BOARD`. In the dashboard: Storage & Databases, KV, Create a namespace (any name), then Workers & Pages, your Worker, Settings, Bindings, Add, KV namespace, variable name `BOARD`. With Wrangler: `npx wrangler kv namespace create BOARD`, then paste the printed `kv_namespaces` block into `wrangler.jsonc` (an example is commented there). Also turn on team PINs, or nobody can save (the site refuses anonymous edits). KV is eventually consistent, so a saved list can take up to about a minute to show for other managers on the other side of the world.
+- **Cloudflare with D1 instead of KV** (the free D1 database works and is strongly consistent, so a saved Terms acceptance is visible immediately everywhere): in the dashboard, Storage & Databases, D1 SQL database, Create; then your Worker, Settings, Bindings, Add, D1 database, variable name `DB`. With Wrangler: `npx wrangler d1 create np` and paste the printed `d1_databases` block into `wrangler.jsonc` (commented example there). No schema to run: the one table is created on first use. If both `BOARD` (KV) and `DB` (D1) are bound, KV is used.
 - **GitHub Pages**: read-only, so the Trade block tab explains that it needs the PC or Cloudflare version.
 
 ## Troubleshooting
