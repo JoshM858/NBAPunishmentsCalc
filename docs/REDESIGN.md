@@ -81,7 +81,7 @@ No backend, data source, scoring or auth changes. No new dependencies.
 | 2 Design system and shell | `public/css/` tokens (exact palette from the brief), base, components, shell, pages; Barlow Condensed + Inter; hash router (`ui/router.js`, old `#week/#recap/#shame/#trade` links redirect); `app.js` is now only the shell; shared sign-in (`account.js`, `ui/signin.js`); seven-section navigation with contextual tabs |
 | 3 Core | `/api/players` (streamed pool), `/api/player` (one player, 40 games, last season), `/api/bios` (one NBA team per call); `players-data.js`, `players-store.js`, `lineup.js`; Dashboard, Players database (2K picker layout), Player profile, My Team; snapshot publishes pool and bios |
 | 4 Remaining | League standings, Punishments, Draft board; Compare; Free agents (waiver sorts); Transactions with Trade centre (existing workspace restyled, 2K-style trade-item slots, Ideas and Proj buttons), Trade finder, Trade block (Target list, Trading block, Untouchables), Activity; Matchups with week schedule; Analytics with five charts |
-| Extras asked for during the work | Confidence meter and O-SHIT meter (`meters.js`); first-run colour chooser with wheel, picker and hex at the same time (`theme.js`, `ui/theme-ui.js`) |
+| Extras asked for during the work | Confidence meter and Oh Fuck - Binky sungle meter (`meters.js`); first-run colour chooser with wheel, picker and hex at the same time (`theme.js`, `ui/theme-ui.js`) |
 | 5 Verify | see below |
 
 ### Deliberate differences from the brief

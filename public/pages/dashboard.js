@@ -30,7 +30,7 @@ function heroHtml(m) {
         <details><summary>What does confidence mean?</summary><p>It is not a margin of error. It shows how settled the race is: half is how much of the week’s points are already banked, half is how lopsided the odds are. Early in the week, or with several teams in the mix, the percentage can move a lot.</p></details>` : ''}
       </div>
       <div class="gauge">
-        <div class="gauge-h"><span>O-SHIT meter</span><b>${hot.score}<small>${esc(hot.level)}</small></b></div>
+        <div class="gauge-h"><span>Oh Fuck - Binky sungle</span><b>${hot.score}<small>${esc(hot.level)}</small></b></div>
         ${segbar(hot.score, true)}<p class="why"><b>${esc(hot.level)}.</b> ${esc(hot.line)} ${Math.round(hot.odds * 100)}% chance of last place, ${Math.round(hot.certainty * 100)}% certain.</p>
         <details><summary>How is this worked out?</summary><p>Chance of finishing last multiplied by how certain that chance is. A 70% chance on day one is only a guess, so the meter stays low; the same 70% late in the week with the team already well behind is nearly settled, so it climbs. Certainty is 60% how much of the week is done (nothing until 15% is scored, full at 85%) and 40% how far the team is already behind the next-worst team on points scored, against what is left to swing. Levels: Cruising, Relaxed, Getting twitchy, Sweating, Panic stations, Code red, Locked in.</p></details>
       </div>
@@ -54,12 +54,12 @@ function boardHtml(m, app) {
         <td class="num">${fmt(r.projFinal)}</td>
         <td class="num hide-sm">${r.gamesLeft}<span class="muted"> / ${r.playersLeft}</span></td>
         <td class="num ${r.odds >= 0.1 ? 'risk-hot' : ''}">${pct(r.odds)}</td>
-        <td class="hide-sm" style="min-width:90px"><div class="meter ${o.score >= 55 ? 'bad' : ''}" title="O-SHIT ${o.score}: ${esc(o.level)}"><span style="width:${o.score}%"></span></div></td>
+        <td class="hide-sm" style="min-width:90px"><div class="meter ${o.score >= 55 ? 'bad' : ''}" title="Oh Fuck - Binky sungle ${o.score}: ${esc(o.level)}"><span style="width:${o.score}%"></span></div></td>
       </tr>`;
     })
     .join('');
   return panel('This week', `<div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th class="num">#</th><th>Team</th><th class="num">Week pts</th><th class="hide-sm"></th><th class="num">Projected</th><th class="num hide-sm">Games / players left</th><th class="num">Last place</th><th class="hide-sm">O-SHIT</th></tr></thead>
+      <thead><tr><th class="num">#</th><th>Team</th><th class="num">Week pts</th><th class="hide-sm"></th><th class="num">Projected</th><th class="num hide-sm">Games / players left</th><th class="num">Last place</th><th class="hide-sm" title="Oh Fuck - Binky sungle">Binky</th></tr></thead>
       <tbody>${rows}</tbody></table></div>`, { cls: 'flush', tools: `<a class="btn sm" href="${link('matchups')}">Matchups</a>` });
 }
 

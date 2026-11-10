@@ -108,7 +108,7 @@ export default {
           <div><p class="kicker">Your team</p><h2>${esc(team.name)}</h2><p class="owner">${esc(team.owner || '')} · <button type="button" class="link" data-a="signout">Not you? Switch team</button></p>
             <p class="line">${row ? `Week rank <b>${row.rank}</b> of ${m.rows.length} with ${fmt(row.weekPts)} points, projected ${fmt(row.projFinal)}. ${plural(row.gamesLeft, 'game')} left across ${plural(row.playersLeft, 'player')}.` : ''}</p></div>
           <div class="gauges">${row ? `<div class="gauge"><div class="gauge-h"><span>Chance of last place</span><b>${pct(row.odds)}</b></div></div>
-            <div class="gauge"><div class="gauge-h"><span>O-SHIT meter</span><b>${heat.score}<small>${esc(heat.level)}</small></b></div><div class="segbar heat">${Array.from({ length: 10 }, (_, i) => `<i class="${heat.score > i * 10 ? 'on' : ''}"></i>`).join('')}</div><p class="why"><b>${esc(heat.level)}.</b> ${esc(heat.line)}</p></div>` : ''}</div>
+            <div class="gauge"><div class="gauge-h"><span>Oh Fuck - Binky sungle</span><b>${heat.score}<small>${esc(heat.level)}</small></b></div><div class="segbar heat">${Array.from({ length: 10 }, (_, i) => `<i class="${heat.score > i * 10 ? 'on' : ''}"></i>`).join('')}</div><p class="why"><b>${esc(heat.level)}.</b> ${esc(heat.line)}</p></div>` : ''}</div>
         </section>
         ${navBar}
         <div class="grid ${past ? '' : 'main-side'}">
