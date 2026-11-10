@@ -50,7 +50,11 @@ function defaultSeason(now = new Date()) {
 // answered from the cache, which is at most a minute or two old, and the response says so (x-refresh-limited).
 export async function handleApi(request, env, ctx) {
   const state = { limited: false };
+  const route = new URL(request.url).pathname;
+  const over = await overBudget(env, route);
+  if (over) return json({ error: `Today’s data allowance has been used up, so live data is paused until tomorrow (UTC). ${over}` }, 503, { 'retry-after': '3600' });
   const res = await handle(request, env, ctx, state);
+  ctx.waitUntil(spend(env, route));
   if (!state.limited) return res;
   const out = new Response(res.body, res); // cached responses have read-only headers
   out.headers.set('x-refresh-limited', '1');
@@ -335,6 +339,33 @@ function json(body, status = 200, headers = {}) {
     status,
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers },
   });
+}
+
+/* ---------- Daily data allowance (the hard safety valve) ---------- */
+
+// Rough size on the wire (compressed) of each heavy route. Only these count against the allowance.
+const COST = { '/api/players': 600_000, '/api/pro-schedule': 250_000, '/api/league': 60_000, '/api/player': 20_000, '/api/bios': 15_000, '/api/free-agents': 15_000, '/api/injuries': 15_000 };
+
+// Set DAILY_BUDGET_MB (default 250, about 7.5 GB a month; 0 turns it off). The PC version has no limit. Once the day's
+// estimate is used up, the heavy routes answer 503 until midnight UTC; sign-in, the trade block and the terms record keep
+// working. The tally lives in the Workers cache of each data centre, so it is an approximate ceiling, not exact billing.
+const budgetOf = (env) => (env.PLATFORM === 'local' ? 0 : env.DAILY_BUDGET_MB == null || env.DAILY_BUDGET_MB === '' ? 250 : Number(env.DAILY_BUDGET_MB)) * 1_000_000;
+const budgetKey = (env) => new Request(`https://espn-cache.invalid/budget/${env.LEAGUE_ID ?? DEFAULTS.LEAGUE_ID}/${new Date().toISOString().slice(0, 10)}`);
+
+async function overBudget(env, route) {
+  const limit = budgetOf(env);
+  if (!(limit > 0) || !COST[route]) return '';
+  const cache = globalThis.caches?.default ?? memoryCache;
+  const used = Number(await (await cache.match(budgetKey(env)).catch(() => null))?.text().catch(() => 0)) || 0;
+  return used >= limit ? `(About ${Math.round(used / 1e6)} MB used of ${Math.round(limit / 1e6)} MB.)` : '';
+}
+
+async function spend(env, route) {
+  const limit = budgetOf(env);
+  if (!(limit > 0) || !COST[route]) return;
+  const cache = globalThis.caches?.default ?? memoryCache;
+  const used = Number(await (await cache.match(budgetKey(env)).catch(() => null))?.text().catch(() => 0)) || 0;
+  await cache.put(budgetKey(env), new Response(String(used + COST[route]), { headers: { 'cache-control': 'public, max-age=90000' } })).catch(() => {});
 }
 
 /* ---------- Refresh limit ---------- */

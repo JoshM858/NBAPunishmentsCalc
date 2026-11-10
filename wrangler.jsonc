@@ -22,7 +22,9 @@
     // Seconds between refreshes for each signed-in team (or device); 0 turns the limit off
     "REFRESH_SECONDS": "5",
     // Seconds between fresh refreshes when no game is on (0 turns this off)
-    "IDLE_REFRESH_SECONDS": "600"
+    "IDLE_REFRESH_SECONDS": "600",
+    // Hard daily data allowance in MB (about 7.5 GB a month); heavy routes pause when it is used up. 0 turns it off
+    "DAILY_BUDGET_MB": "250"
   }
   // Trade block (target lists, trading blocks): create a namespace with `npx wrangler kv namespace create BOARD`, then uncomment and paste its id:
   // "kv_namespaces": [{ "binding": "BOARD", "id": "PASTE-THE-ID-HERE" }],

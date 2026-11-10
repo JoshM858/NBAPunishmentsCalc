@@ -120,6 +120,27 @@ fake.restore();
   assert.equal((await bare({ LEAGUE_ID: '' })).configured, false);
 }
 
+// The daily data allowance: heavy routes stop at the limit, small ones keep working, the PC version has none
+{
+  const fakeE = installFakeEspn({ leagueId: '999' });
+  const env = { LEAGUE_ID: '999', SEASON: '2027', REFRESH_SECONDS: '0', HIDE_TEAMS: '', DAILY_BUDGET_MB: '1' }; // 1 MB: two player-pool loads
+  const players = () => handleApi(new Request('http://budget.test/api/players'), env, ctx);
+  const tick = () => new Promise((r) => setTimeout(r, 10)); // the tally is written after the response
+  assert.equal((await players()).status, 200);
+  await tick();
+  assert.equal((await players()).status, 200);
+  await tick();
+  const stopped = await players();
+  assert.equal(stopped.status, 503, 'over the allowance');
+  assert.match((await stopped.json()).error, /allowance has been used up/);
+  assert.equal(stopped.headers.get('retry-after'), '3600');
+  assert.equal((await handleApi(new Request('http://budget.test/api/config'), env, ctx)).status, 200, 'small routes still work');
+  assert.equal((await handleApi(new Request('http://budget.test/api/me'), env, ctx)).status, 200);
+  assert.equal((await handleApi(new Request('http://budget.test/api/players'), { ...env, PLATFORM: 'local' }, ctx)).status, 200, 'the PC version has no limit');
+  assert.equal((await handleApi(new Request('http://budget.test/api/players'), { ...env, DAILY_BUDGET_MB: '0' }, ctx)).status, 200, 'switched off');
+  fakeE.restore();
+}
+
 // Config never leaks cookie values
 {
   fake = installFakeEspn();
