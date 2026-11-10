@@ -391,7 +391,7 @@ async function saveBoard(request, env, leagueId) {
 
 /* ---------- Terms record ---------- */
 
-export const TERMS_VERSION = 1; // raise when the terms change: everyone is asked to accept again
+export const TERMS_VERSION = 2; // raise when the terms change: everyone is asked to accept again
 const acceptKey = (leagueId, teamId) => `accept:${leagueId}:${teamId}`;
 
 async function readAcceptances(env, leagueId) {

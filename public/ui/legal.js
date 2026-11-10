@@ -4,6 +4,8 @@ const DOCS = {
   terms: ['Terms and punishment pact', `
     <h4>The punishment pact</h4>
     <p>Each week the team with the lowest score receives a punishment from the league. By accepting, which is recorded against your team with the date and time and cannot be withdrawn, you agree that if your team finishes last in any week you will complete that punishment, whatever it is, in full and on time, and you won't dispute the result as the site calculates it from ESPN's scores.</p>
+    <h4>How many punishments</h4>
+    <p>The punishment grows with the season. In week N, the team that finishes last owes <b>N punishments</b>: in week 4 that is four. For each of them you do either the exact same punishment again, or one of the league's punishments, as the organiser decides. Punishments from earlier weeks that were not completed still stand and are added on top.</p>
     <h4>Using the site</h4>
     <p>The site is a private tool for one fantasy league. Its odds, ratings and advice are estimates, not promises. It cannot make trades or change lineups: do that in ESPN. Don't try to overload it, bypass the refresh limit or sign in as another manager.</p>
     <h4>Changes</h4>
