@@ -1,6 +1,6 @@
 // My Team: your lineup, what it is worth, and the best lineup for the next game day (view only: set it in ESPN).
 import { suggestLineup } from '../lineup.js';
-import { bankedShare, oshit } from '../meters.js';
+import { oshit } from '../meters.js';
 import { dayLabel, finishedThrough, localTime, zoneName } from '../logic.js';
 import { autoDay, clampDay, dayBounds, rosterOnDay } from '../dayplan.js';
 import { esc, fmt, fmt1, panel, pct, plural } from '../ui/dom.js';
@@ -82,8 +82,7 @@ export default {
     }
     const m = app.model;
     const row = m.rows.find((r) => r.id === team.id);
-    const banked = bankedShare(m.rows);
-    const heat = row ? oshit(row, row.id === m.loser?.id ? m.safety : m.rows.filter((r) => r.id !== row.id).sort((a, b) => b.projFinal - a.projFinal).at(-1), banked) : null;
+    const heat = row ? oshit(row, m.rows) : null;
 
     const draw = (pool, ctx) => {
       const { league, pro } = app.ctx;
@@ -109,7 +108,7 @@ export default {
           <div><p class="kicker">Your team</p><h2>${esc(team.name)}</h2><p class="owner">${esc(team.owner || '')} · <button type="button" class="link" data-a="signout">Not you? Switch team</button></p>
             <p class="line">${row ? `Week rank <b>${row.rank}</b> of ${m.rows.length} with ${fmt(row.weekPts)} points, projected ${fmt(row.projFinal)}. ${plural(row.gamesLeft, 'game')} left across ${plural(row.playersLeft, 'player')}.` : ''}</p></div>
           <div class="gauges">${row ? `<div class="gauge"><div class="gauge-h"><span>Chance of last place</span><b>${pct(row.odds)}</b></div></div>
-            <div class="gauge"><div class="gauge-h"><span>O-SHIT meter</span><b>${heat.score}<small>${esc(heat.level)}</small></b></div><div class="segbar heat">${Array.from({ length: 10 }, (_, i) => `<i class="${heat.score > i * 10 ? 'on' : ''}"></i>`).join('')}</div><p class="why">${esc(heat.line)}</p></div>` : ''}</div>
+            <div class="gauge"><div class="gauge-h"><span>O-SHIT meter</span><b>${heat.score}<small>${esc(heat.level)}</small></b></div><div class="segbar heat">${Array.from({ length: 10 }, (_, i) => `<i class="${heat.score > i * 10 ? 'on' : ''}"></i>`).join('')}</div><p class="why"><b>${esc(heat.level)}.</b> ${esc(heat.line)}</p></div>` : ''}</div>
         </section>
         ${navBar}
         <div class="grid ${past ? '' : 'main-side'}">

@@ -1,5 +1,5 @@
 // Dashboard: who is on track for the punishment, how sure we are, game-day times and the week at a glance.
-import { bankedShare, confidence, oshit } from '../meters.js';
+import { confidence, oshit } from '../meters.js';
 import { form } from '../players-data.js';
 import { esc, fmt, fmt1, moveBadge, names, panel, pct, plural, signed } from '../ui/dom.js';
 import { headshot, statusChip } from '../ui/player.js';
@@ -15,7 +15,7 @@ function heroHtml(m) {
   const final = r?.final ? `<p class="final-banner">Week ${r.week.id} final: ${esc(names(r.last))} ${r.last.length > 1 ? 'share' : 'cops'} the punishment on ${fmt(r.last[0].weekPts)}.</p>` : '';
   const gap = m.safety ? `${fmt(m.gap)} behind ${esc(m.safety.name)} on projection.` : '';
   const conf = confidence(m);
-  const hot = oshit(L, m.safety, bankedShare(m.rows));
+  const hot = oshit(L, m.rows);
   return `${final}<section class="hero" aria-label="Projected last place">
     <div>
       <p class="kicker">On track for the punishment</p>
@@ -31,8 +31,8 @@ function heroHtml(m) {
       </div>
       <div class="gauge">
         <div class="gauge-h"><span>O-SHIT meter</span><b>${hot.score}<small>${esc(hot.level)}</small></b></div>
-        ${segbar(hot.score, true)}<p class="why">${esc(hot.line)}</p>
-        <details><summary>How is this worked out?</summary><p>Half is ${esc(L.name)}’s chance of finishing last, 30% is how far behind the safest team it projects (against its own ups and downs), and 20% is how much of the week is already locked in. 0 is nowhere near trouble, 100 is the punishment looking certain.</p></details>
+        ${segbar(hot.score, true)}<p class="why"><b>${esc(hot.level)}.</b> ${esc(hot.line)} ${Math.round(hot.odds * 100)}% chance of last place, ${Math.round(hot.certainty * 100)}% certain.</p>
+        <details><summary>How is this worked out?</summary><p>Chance of finishing last multiplied by how certain that chance is. A 70% chance on day one is only a guess, so the meter stays low; the same 70% late in the week with the team already well behind is nearly settled, so it climbs. Certainty is 60% how much of the week is done (nothing until 15% is scored, full at 85%) and 40% how far the team is already behind the next-worst team on points scored, against what is left to swing. Levels: Cruising, Relaxed, Getting twitchy, Sweating, Panic stations, Code red, Locked in.</p></details>
       </div>
     </div>
   </section>`;
@@ -42,11 +42,10 @@ function boardHtml(m, app) {
   const top = Math.max(1, ...m.rows.map((r) => r.weekPts));
   const lastRank = Math.max(...m.rows.map((r) => r.rank));
   const mine = app.account.team()?.id;
-  const banked = bankedShare(m.rows);
   const rows = m.rows
     .map((r) => {
       const cls = [r.rank === lastRank && 'last', r.id === mine && 'me'].filter(Boolean).join(' ');
-      const o = oshit(r, m.safety, banked);
+      const o = oshit(r, m.rows);
       return `<tr class="${cls}">
         <td class="num strong">${r.rank}${moveBadge(r.prevRank, r.rank)}</td>
         <th scope="row"><div class="who-cell"><b>${esc(r.name)}</b>${r.owner ? `<small>${esc(r.owner)}</small>` : ''}</div></th>
@@ -55,7 +54,7 @@ function boardHtml(m, app) {
         <td class="num">${fmt(r.projFinal)}</td>
         <td class="num hide-sm">${r.gamesLeft}<span class="muted"> / ${r.playersLeft}</span></td>
         <td class="num ${r.odds >= 0.1 ? 'risk-hot' : ''}">${pct(r.odds)}</td>
-        <td class="hide-sm" style="min-width:90px"><div class="meter ${o.score >= 60 ? 'bad' : ''}" title="O-SHIT ${o.score}: ${esc(o.level)}"><span style="width:${o.score}%"></span></div></td>
+        <td class="hide-sm" style="min-width:90px"><div class="meter ${o.score >= 55 ? 'bad' : ''}" title="O-SHIT ${o.score}: ${esc(o.level)}"><span style="width:${o.score}%"></span></div></td>
       </tr>`;
     })
     .join('');

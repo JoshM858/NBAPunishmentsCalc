@@ -30,18 +30,32 @@ export function confidence(model) {
   return { score, level, banked, concentration: conc, why };
 }
 
-// The O-SHIT meter for one team: half its chance of finishing last, 30% how far behind the safest team it
-// projects (in standard deviations of its own week), 20% how much of the week is already locked in.
-export function oshit(row, safety, banked) {
+// The O-SHIT meter for one team: how worried it should be right now = its chance of finishing last x how certain that
+// chance is. Early in a week a 70% chance is only a guess, so the meter stays low; late in the week, with the team
+// already well behind, the same chance means it is basically decided. Certainty is 60% how much of the week is done
+// (nothing until 15% is scored, full at 85%) and 40% how far the team is already behind the next-worst team on
+// points actually scored, measured against how much the rest of the week can still swing.
+export const OSHIT_LEVELS = [
+  [85, 'Locked in', 'The punishment is as good as booked.'],
+  [70, 'Code red', 'It is nearly settled and not in your favour.'],
+  [55, 'Panic stations', 'Well behind with little time left to fix it.'],
+  [40, 'Sweating', 'A bad spot and the week is moving on.'],
+  [25, 'Getting twitchy', 'On the wrong end, but it is not decided.'],
+  [10, 'Relaxed', 'Not likely, or far too early to say.'],
+  [0, 'Cruising', 'Nothing to worry about.'],
+];
+
+export function oshit(row, rows) {
   if (!row) return null;
-  const gap = safety ? Math.max(0, safety.projFinal - row.projFinal) : 0;
-  const behind = row.sd > 0 ? clamp(gap / (1.5 * row.sd)) : gap > 0 ? 1 : 0;
-  const score = Math.round(100 * (0.5 * clamp(row.odds) + 0.3 * behind + 0.2 * clamp(banked) * clamp(row.odds * 2)));
-  const [level, line] =
-    score >= 80 ? ['O-SHIT', 'It is happening. Check the lineup and find a miracle.']
-    : score >= 60 ? ['Panic', 'Deep trouble: a big night from someone is needed.']
-    : score >= 40 ? ['Sweating', 'On the wrong end of the board with time left to fix it.']
-    : score >= 20 ? ['Uneasy', 'Not safe yet, but not far behind.']
-    : ['Chill', 'Nowhere near the bottom.'];
-  return { score, level, line, gap, behind };
+  const banked = bankedShare(rows);
+  const others = rows.filter((r) => r.id !== row.id);
+  const time = clamp((banked - 0.15) / 0.7);
+  const behind = others.length ? Math.min(...others.map((r) => r.weekPts)) - row.weekPts : 0; // > 0: this team is last right now by this much
+  const swing = row.sd > 0 ? 1.5 * row.sd : 1;
+  const lock = clamp(behind / swing);
+  const certainty = clamp(0.6 * time + 0.4 * lock);
+  const odds = clamp(row.odds);
+  const score = Math.round(100 * odds * certainty);
+  const [, level, line] = OSHIT_LEVELS.find(([min]) => score >= min);
+  return { score, level, line, odds, certainty, time, lock };
 }
