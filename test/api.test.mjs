@@ -214,6 +214,43 @@ for (const [mode, status, pattern] of [
   globalThis.fetch = real;
 }
 
+// Outside game hours a fresh request is limited to IDLE_REFRESH_SECONDS; during games it is the normal 5 seconds
+{
+  const real = globalThis.fetch;
+  const realNow = Date.now;
+  let state = 'in';
+  let leagueHits = 0;
+  globalThis.fetch = async (input) => {
+    const u = String(input);
+    if (u.includes('/scoreboard')) return new Response(JSON.stringify({ events: [{ id: '1', date: new Date(realNow()).toISOString(), status: { type: { state, detail: '' } } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    leagueHits++;
+    return new Response(JSON.stringify({ teams: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const send = (ip, env = {}) => handleApi(new Request('http://idle.test/api/league?view=mTeam&fresh=1', { headers: { 'x-real-ip': ip } }), { LEAGUE_ID: '888', SEASON: '2027', ...env }, ctx);
+  // a game in progress: the normal short limit, no idle note
+  assert.equal((await send('9.9.9.2')).headers.get('x-refresh-idle'), null);
+  assert.equal((await send('9.9.9.2')).headers.get('x-refresh-idle'), null);
+  // the scoreboard answer is cached for 30 s: move the clock on, then no game is on
+  let skew = 31_000;
+  Date.now = () => realNow() + skew;
+  state = 'post';
+  leagueHits = 0;
+  let r = await send('9.9.9.1');
+  assert.equal(r.headers.get('x-refresh-limited'), null);
+  r = await send('9.9.9.1');
+  assert.equal(r.headers.get('x-refresh-limited'), '1');
+  assert.equal(r.headers.get('x-refresh-idle'), '600');
+  assert.equal(leagueHits, 1, 'ESPN was asked once');
+  assert.equal((await send('9.9.9.3', { IDLE_REFRESH_SECONDS: '0' })).headers.get('x-refresh-idle'), null, 'switched off');
+  // ESPN's scoreboard unreachable: treat as live, never lock anyone out of live numbers
+  skew = 62_000;
+  globalThis.fetch = async (input) => (String(input).includes('/scoreboard') ? new Response('nope', { status: 500 }) : new Response(JSON.stringify({ teams: [] }), { status: 200, headers: { 'content-type': 'application/json' } }));
+  await send('9.9.9.4');
+  assert.equal((await send('9.9.9.4')).headers.get('x-refresh-idle'), null, 'unknown means treat as live');
+  Date.now = realNow;
+  globalThis.fetch = real;
+}
+
 // Only whitelisted views and GET
 {
   fake = installFakeEspn();
@@ -462,10 +499,10 @@ for (const [mode, status, pattern] of [
     hits++;
     return new Response(JSON.stringify({ teams: [], marker: hits }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
-  const send = (path, { env = {}, headers = {} } = {}) => handleApi(new Request(`http://rl.test${path}`, { headers }), { LEAGUE_ID: '777', SEASON: '2027', ...env }, ctx);
+  const send = (path, { env = {}, headers = {} } = {}) => handleApi(new Request(`http://rl.test${path}`, { headers }), { LEAGUE_ID: '777', SEASON: '2027', IDLE_REFRESH_SECONDS: '0', ...env }, ctx);
   const league = '/api/league?view=mTeam&fresh=1';
   const login = async (id, pin) => {
-    const res = await handleApi(new Request('http://rl.test/api/login', { method: 'POST', body: JSON.stringify({ teamId: id, pin }) }), { LEAGUE_ID: '777', ...pins }, ctx);
+    const res = await handleApi(new Request('http://rl.test/api/login', { method: 'POST', body: JSON.stringify({ teamId: id, pin }) }), { LEAGUE_ID: '777', IDLE_REFRESH_SECONDS: '0', ...pins }, ctx);
     return res.headers.get('set-cookie').split(';')[0];
   };
 

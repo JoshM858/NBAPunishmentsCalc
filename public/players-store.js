@@ -2,13 +2,34 @@
 // Ages and sizes arrive a moment later (30 small requests); `onBios` fires when they do.
 import { enrich } from './players-data.js';
 
+// The slim pool is also kept in this browser (10 minutes during games, an hour once the day is done), so reopening the
+// Players pages doesn't download it again. A manual Refresh skips it.
+const keyOf = (ctx) => `pw:pool:${ctx.cfg?.leagueId ?? 'site'}:${ctx.cfg?.season ?? ''}`;
+const stored = (ctx, ttl) => {
+  try {
+    const hit = JSON.parse(localStorage.getItem(keyOf(ctx)));
+    return hit && Date.now() - hit.t < ttl ? hit.players : null;
+  } catch {
+    return null;
+  }
+};
+const keep = (ctx, players) => {
+  try {
+    localStorage.setItem(keyOf(ctx), JSON.stringify({ t: Date.now(), players }));
+  } catch {}
+};
+
 export function createPlayerStore(data) {
   let cache = null;
+  let skipStored = false;
   const listeners = new Set();
 
   async function load() {
     const { ctx, src } = data();
-    const raw = await src.players();
+    const idle = data().dayDone === true;
+    const raw = (!skipStored && src.kind !== 'static' && stored(ctx, idle ? 3_600_000 : 600_000)) || (await src.players());
+    if (src.kind !== 'static') keep(ctx, raw);
+    skipStored = false;
     const bios = new Map();
     const make = () => enrich(raw, { league: ctx.league, injuries: ctx.injuries, bios, pro: ctx.pro });
     const state = { players: make(), loading: true, byId: null };
@@ -32,7 +53,10 @@ export function createPlayerStore(data) {
   }
 
   return {
-    reset: () => (cache = null),
+    reset: (fresh = false) => {
+      cache = null;
+      skipStored = Boolean(fresh);
+    },
     get() {
       cache ||= load().catch((err) => {
         cache = null; // let the next visit try again

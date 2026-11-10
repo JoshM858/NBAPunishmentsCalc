@@ -79,6 +79,7 @@ async function apiGet(path, { fresh } = {}) {
   try {
     res = await fetch(path, fresh ? { cache: 'no-store' } : undefined);
     if (res.headers.get('x-refresh-limited')) app.limited = true;
+    if (res.headers.get('x-refresh-idle')) app.idle = Number(res.headers.get('x-refresh-idle'));
   } catch {
     throw new Error('Couldn’t reach the server. Check your connection, or that the local server is still running.');
   }
@@ -141,6 +142,7 @@ async function load({ fresh = false } = {}) {
   if (app.busy) return;
   app.tried = Date.now();
   app.limited = false;
+  app.idle = 0;
   setBusy(true);
   try {
     const src = await pickSource({ fresh });
@@ -151,7 +153,7 @@ async function load({ fresh = false } = {}) {
     app.src = src;
     app.ctx = ctx;
     app.trade.reset();
-    app.store.reset();
+    app.store.reset(fresh);
     tctx = null;
     await app.account.reset(cfg.pins);
     app.tz = validTimeZone(cfg.timezone) ? cfg.timezone : 'Australia/Melbourne';
@@ -236,7 +238,7 @@ function show() {
   const snap = app.src.generatedAt;
   $('updated').textContent = snap
     ? `Data from ${stamp(snap)} (${ago(snap)}). Checked ${clock(app.updated)}.`
-    : `Updated ${clock(app.updated)}. Next ${clock(app.updated + HOUR)}.${app.limited ? ' You refreshed a moment ago, so this is the latest available right now.' : ''}`;
+    : `Updated ${clock(app.updated)}. Next ${clock(app.updated + HOUR)}.${app.idle ? ` No games are on, so fresh data is limited to every ${Math.round(app.idle / 60)} minutes.` : app.limited ? ' You refreshed a moment ago, so this is the latest available right now.' : ''}`;
   document.title = `${m.loser?.name ?? 'NBA Punishments'} on track for the punishment`;
 
   const banner = $('banner');

@@ -54,6 +54,7 @@ export async function handleApi(request, env, ctx) {
   if (!state.limited) return res;
   const out = new Response(res.body, res); // cached responses have read-only headers
   out.headers.set('x-refresh-limited', '1');
+  if (state.idle) out.headers.set('x-refresh-idle', String(state.idle));
   return out;
 }
 
@@ -68,11 +69,16 @@ async function handle(request, env, ctx, state) {
   const leagueId = String(env.LEAGUE_ID ?? DEFAULTS.LEAGUE_ID).trim();
   const cookie = cookieHeader(env);
   const refreshSeconds = env.REFRESH_SECONDS == null || env.REFRESH_SECONDS === '' ? 5 : Number(env.REFRESH_SECONDS);
+  // Outside game hours the data can't change, so a fresh request is allowed far less often (IDLE_REFRESH_SECONDS, default
+  // 10 minutes; 0 turns this off). That saves bandwidth and requests when nobody needs second-by-second numbers.
+  const idleSeconds = env.IDLE_REFRESH_SECONDS == null || env.IDLE_REFRESH_SECONDS === '' ? 600 : Number(env.IDLE_REFRESH_SECONDS);
   // true when this request may bypass the cache (it asked for fresh data and is within its allowance)
   const wantFresh = async (route) => {
     if (url.searchParams.get('fresh') !== '1') return false;
     if (!(refreshSeconds > 0)) return true;
-    if (await refreshLimited(request, env, route, refreshSeconds)) {
+    const idle = idleSeconds > refreshSeconds && !(await gamesActive(ctx));
+    if (idle) state.idle = idleSeconds;
+    if (await refreshLimited(request, env, route, idle ? idleSeconds : refreshSeconds)) {
       state.limited = true;
       return false;
     }
@@ -112,12 +118,7 @@ async function handle(request, env, ctx, state) {
     if (url.pathname === '/api/scoreboard') {
       const date = url.searchParams.get('date') || '';
       if (!/^\d{8}$/.test(date)) return json({ error: 'date must look like 20261028.' }, 400);
-      return trimmed(`scoreboard-${date}`, 30, ctx, await wantFresh('scoreboard'), async () => {
-        const res = await fetch(`${SCOREBOARD}?dates=${date}`, { headers: { Accept: 'application/json' } });
-        if (!res.ok) return json({ error: `ESPN’s scoreboard returned HTTP ${res.status}.` }, 502);
-        const body = await res.json();
-        return { events: (body.events || []).map((e) => ({ id: e.id, date: e.date, status: { type: { state: e.status?.type?.state, detail: e.status?.type?.detail } } })) };
-      });
+      return trimmed(`scoreboard-${date}`, 30, ctx, await wantFresh('scoreboard'), () => scoreboardOf(date));
     }
 
     // Who is hurt and when ESPN expects them back. Trimmed to what the page reads (the raw feed is about 1 MB).
@@ -243,6 +244,32 @@ async function handle(request, env, ctx, state) {
 // Cache the trimmed answer, not ESPN's big one: parsing a megabyte of JSON on every request would eat the
 // Cloudflare free plan's 10 ms of CPU, but it costs nothing when the cached answer is served as it is.
 // `make` returns the object to send, or a Response (an error) which is passed through uncached.
+const scoreboardOf = async (date) => {
+  const res = await fetch(`${SCOREBOARD}?dates=${date}`, { headers: { Accept: 'application/json' } });
+  if (!res.ok) return json({ error: `ESPN’s scoreboard returned HTTP ${res.status}.` }, 502);
+  const body = await res.json();
+  return { events: (body.events || []).map((e) => ({ id: e.id, date: e.date, status: { type: { state: e.status?.type?.state, detail: e.status?.type?.detail } } })) };
+};
+
+// Is an NBA game in progress or about to start (within 45 minutes)? Checks the small cached scoreboard for the US
+// date and the one before it. Any doubt counts as yes, so an ESPN hiccup never locks anyone out of live numbers.
+async function gamesActive(ctx) {
+  const etDate = (offsetDays) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(Date.now() + offsetDays * 86_400_000).replaceAll('-', '');
+  try {
+    for (const d of [etDate(0), etDate(-1)]) {
+      const res = await trimmed(`scoreboard-${d}`, 30, ctx, false, () => scoreboardOf(d));
+      if (!res.ok) return true;
+      for (const e of (await res.json()).events || []) {
+        const st = e.status?.type?.state;
+        if (st === 'in' || (st === 'pre' && Date.parse(e.date) - Date.now() < 45 * 60_000)) return true;
+      }
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 async function trimmed(name, ttl, ctx, fresh, make) {
   const cache = globalThis.caches?.default ?? memoryCache;
   const key = new Request(`https://espn-cache.invalid/trimmed/${name}`);

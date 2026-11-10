@@ -185,6 +185,13 @@ The lists need somewhere to be stored:
 
 The Refresh button works once every 5 seconds. It is enforced on the server too, so it cannot be skipped by clicking faster or reloading: the limit is counted for each signed-in team (when team PINs are on) or for each device, and separately for each kind of data. Going over the limit is not an error: you get the latest cached data (never more than a minute or two old) with a note. Change it with `REFRESH_SECONDS` (0 turns it off). Automatic hourly refreshes are not affected.
 
+## Saving bandwidth
+
+- **Quiet outside games.** When no NBA game is in progress or about to start (checked from ESPN's small, cached scoreboard), a fresh Refresh is allowed once every 10 minutes instead of every 5 seconds (`IDLE_REFRESH_SECONDS`, 0 turns this off). The page says so. If ESPN's scoreboard can't be reached it counts as game time, so nobody is locked out of live numbers.
+- **The big download is cached.** The player pool is kept on the server for 10 minutes and in each browser for 10 minutes during games or an hour once the day is done, so reopening the Players pages doesn't download it again. Pressing Refresh skips the browser copy.
+- **Pictures cost you nothing.** Player and team pictures come from ESPN's servers and the browser keeps them, so they don't count against your hosting bandwidth.
+- Cloudflare compresses responses automatically, and the page files are saved in the browser by the app's service worker.
+
 ## Season-long points leagues
 
 ESPN reports this league type (`TOTAL_SEASON_POINTS`) with no weekly matchups and one meaningless matchup period, so the page ignores it and uses 7-day weeks starting on `WEEK_START` (Tuesday unless you change it). Head-to-head leagues that have real weekly matchup periods use those instead, and read daily team scores from ESPN's matchup feed when it has them.
